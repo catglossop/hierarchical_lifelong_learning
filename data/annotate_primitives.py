@@ -3,10 +3,13 @@ import random
 import os
 import matplotlib.pyplot as plt
 import numpy as np
+import imageio as iio
+
 
 MIN_STEPS = 4
 MAX_STEPS = 8
 DATASET_PATH = "/home/noam/LLLwL/gnm_dataset/sacson"
+VISUALIZE = True 
 
 varied_forward = [
     "Move forward",
@@ -109,13 +112,14 @@ for name in os.listdir(DATASET_PATH):
 
 def get_yaw_delta(yaw_reshape):
     pos_mask_end = np.where(yaw_reshape[:,-1] >= 0, 1, -1).squeeze()
-    pos_mask_start = np.where(yaw_reshape[:,-1] >= 0, 1, -1).squeeze()
+    pos_mask_start = np.where(yaw_reshape[:,0] >= 0, 1, -1).squeeze()
     yaw_end = yaw_reshape[:,-1] - pos_mask_end*np.floor(np.abs(yaw_reshape[:,-1])/(2*np.pi))*2*np.pi 
     yaw_end[pos_mask_end == -1] += 2*np.pi
     yaw_start = yaw_reshape[:,0] - pos_mask_start*np.floor(np.abs(yaw_reshape[:,0])/(2*np.pi))*2*np.pi 
     yaw_start[pos_mask_start == -1] += 2*np.pi
-    yaw_delta = yaw_end - yaw_start 
-    breakpoint()
+    yaw_delta = yaw_end - yaw_start
+    print("Yaw start transformed: ", yaw_start)
+    print("Yaw end transformed: ", yaw_end) 
     return yaw_delta
 yaw_avgs = []
 yaw_stds = []
@@ -220,10 +224,14 @@ def get_language_instructions(yaw, pos):
         end = (i+1)*CHUNK_SIZE
         if (i+1)*CHUNK_SIZE >= yaw.shape[0]:
             end = -1
-
-        yaw_delta = get_yaw_delta(np.expand_dims(yaw[i*CHUNK_SIZE:end],0)).squeeze()
-        breakpoint()
+        yaw_reshape = np.expand_dims(yaw[i*CHUNK_SIZE:end],0)
+        if i*CHUNK_SIZE == len(yaw)-1:
+            yaw_reshape = np.expand_dims(yaw[i*CHUNK_SIZE:],0)
+        yaw_delta = get_yaw_delta(yaw_reshape).squeeze()
         pos_delta = np.sqrt(np.sum(np.square(pos[end,:] - pos[i*CHUNK_SIZE,:]), axis=-1))
+        print("Yaw delta: ", yaw_delta)
+        print("Yaw start: ", yaw[i*CHUNK_SIZE])
+        print("Yaw end: ", yaw[end])
         if yaw_delta > TURN_THRESHOLD:
             language_instructions.append(base_instructions[0]) 
             varied_language_instructions.append(random.choice(varied_left))
@@ -231,12 +239,14 @@ def get_language_instructions(yaw, pos):
             language_instructions.append(base_instructions[1]) 
             varied_language_instructions.append(random.choice(varied_right))
         else:
+            print("Pos delta: ", pos_delta)
             if pos_delta > STOP_THRESHOLD:
                 language_instructions.append(base_instructions[2]) 
                 varied_language_instructions.append(random.choice(varied_forward))
             elif pos_delta < STOP_THRESHOLD:
                 language_instructions.append(base_instructions[3]) 
                 varied_language_instructions.append(random.choice(varied_stop))
+        breakpoint()
             
     return language_instructions, varied_language_instructions    
 
@@ -251,6 +261,32 @@ for folder in folder_names:
         # Save the language data
         with open(os.path.join(folder, 'traj_data_language.pkl'), 'wb') as g:
             pkl.dump(data, g)
+
+
+
+if VISUALIZE: 
+
+    folder = random.choice(folder_names)
+    long_enough = False
+    while not long_enough:
+        with open(os.path.join(folder, "traj_data_language.pkl"), 'rb') as f: 
+            data = pkl.load(f)
+            if len(data["language_instructions"]) >= 5*CHUNK_SIZE:
+                long_enough = True
+            else:
+                folder = random.choice(folder_names)
+            language_instructions = data["language_instructions"]
+
+    fig, ax = plt.subplots(5,CHUNK_SIZE, figsize=(15, 15))
+    for i in range(5):
+        for j in range(CHUNK_SIZE):
+            image = iio.imread(os.path.join(folder, f"{i*5 + j}.jpg"))
+            ax[i, j].imshow(image)
+            ax[i, j].set_title(language_instructions[i*CHUNK_SIZE])
+            
+    plt.show()
+
+
 
 
 
