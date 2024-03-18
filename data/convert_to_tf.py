@@ -21,6 +21,7 @@ Can write directly to Google Cloud Storage, but not read from it.
 import glob
 import logging
 import os
+import sys
 import pickle
 import random
 import yaml
@@ -28,69 +29,16 @@ from datetime import datetime
 from functools import partial
 from multiprocessing import Pool
 import torch
+from typing import Tuple, Dict, Any, Callable, Sequence, Union
 
 import numpy as np
 import tensorflow as tf
 import tqdm
 from absl import app, flags
+from absl.flags import FLAGS
 from tqdm_multiprocess import TqdmMultiProcessPool
 
-import dlimp as dl
-from dlimp.utils import read_resize_encode_image, tensor_feature
-from vint_train.data.vint_dataset import ViNT_Dataset
 from torch.utils.data import DataLoader, ConcatDataset, Subset
-from vint_train.data.data_utils import (
-    img_path_to_data,
-    calculate_sin_cos,
-    get_data_path,
-    to_local_coords,
-)
-
-"""
-Converts data from the BridgeData raw format to TFRecord format.
-
-Consider the following directory structure for the input data:
-
-    sacson_raw/
-        month-day-year-location-run/
-            0.jpg
-            ...
-            n.jpg
-            traj_data.pkl
-        
-
-The --depth parameter controls how much of the data to process at the
---input_path; for example, if --depth=1, then --input_path should be
-"sacson", and all data will be processed.
-
-Can write directly to Google Cloud Storage, but not read from it.
-"""
-
-import glob
-import logging
-import os
-import pickle
-import random
-import yaml
-from datetime import datetime
-from functools import partial
-from multiprocessing import Pool
-import torch
-from typing import Tuple
-
-import numpy as np
-import tensorflow as tf
-import tqdm
-from absl import app, flags
-from tqdm_multiprocess import TqdmMultiProcessPool
-
-import dlimp as dl
-from dlimp.utils import read_resize_encode_image, tensor_feature, resize_image
-from vint_train.data.vint_dataset import ViNT_Dataset
-from torch.utils.data import DataLoader, ConcatDataset, Subset
-
-
-FLAGS = flags.FLAGS
 
 flags.DEFINE_string("input_path", None, "Input path", required=True)
 flags.DEFINE_string("output_path", None, "Output path", required=True)
@@ -102,82 +50,121 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_bool("overwrite", False, "Overwrite existing files")
 flags.DEFINE_float(
-    "train_proportion", 0.9, "Proportion of data to use for training (rather than val)"
+    "train_proportion", 0.8, "Proportion of data to use for training (rather than val)"
 )
 flags.DEFINE_integer("num_workers", 8, "Number of threads to use")
 flags.DEFINE_integer("shard_size", 200, "Maximum number of trajectories per shard")
-flags.DEFINE_string('text_annots', None, 'text annotations path', required=False)
-flags.DEFINE_string('config', "sacson.yaml", 'config path', required=False)
-flags.DEFINE_integer('traj_len', 20, "num steps per traj", required=False)
+
+INDOOR_DATASETS = ["sacson", "cory_hall", "go_stanford_cropped"]
 
 IMAGE_SIZE = (128, 128)
 
-def resize_encode_image(tensor: torch.Tensor, size: Tuple[int, int]) -> tf.Tensor:
+def tensor_feature(value):
+    return tf.train.Feature(
+        bytes_list=tf.train.BytesList(value=[tf.io.serialize_tensor(value).numpy()])
+    )
+def resize_image(image: tf.Tensor, size: Tuple[int, int]) -> tf.Tensor:
+    """Resizes an image using Lanczos3 interpolation. Expects & returns uint8."""
+    assert image.dtype == tf.uint8
+    image = tf.image.resize(image, size, method="lanczos3", antialias=True)
+    image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8)
+    return image
+
+def read_resize_encode_image(path: str, size: Tuple[int, int]) -> tf.Tensor:
     """Reads, decodes, resizes, and then re-encodes an image."""
-    image = tf.convert_to_tensor(np.transpose((tensor.numpy()*255).astype(np.uint8), axes=(1,2,0)))
+    data = tf.io.read_file(path)
+    image = tf.image.decode_jpeg(data)
     image = resize_image(image, size)
     image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8)
     return tf.io.encode_jpeg(image, quality=95)
 
-# create a tfrecord for a group of trajectories
-def create_tfrecord(items, output_path, tqdm_func=None, global_tqdm=None):
-    writer = tf.io.TFRecordWriter(output_path)
-    for idx, item in enumerate(iter(items)):
-        try: 
-            (obs_image,
-            goal_image,
-            action_label,
-            dist_label,
-            goal_pos,
-            dataset_index,
-            action_mask,
-            lang,) = item 
+def flatten_dict(d: Dict[str, Any], sep="/") -> Dict[str, Any]:
+    """Given a nested dictionary, flatten it by concatenating keys with sep."""
+    flattened = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            for k2, v2 in flatten_dict(v, sep=sep).items():
+                flattened[k + sep + k2] = v2
+        else:
+            flattened[k] = v
+    return flattened
 
-            out = dict()
+def process_images(path):
+    image_paths = sorted(glob.glob(os.path.join(path, "*.jpg")))
+    imgs = [read_resize_encode_image(img_path, IMAGE_SIZE) for img_path in image_paths]
+    return imgs
 
-            obs_image = torch.cat((obs_image, goal_image), dim=0) 
+def process_trajs(path):
+    # load_data
+    fp = os.path.join(path, "traj_data_language.pkl")
+    with open(fp, "rb") as f:
+        data = pickle.load(f)
+    
+    images = process_images(path)
+    lang = data["language_instructions"]
+    varied_lang = data["varied_language_instructions"]
+    CHUNK_SIZE = data["chunk_size"]
 
-            obs = [resize_encode_image(obs_image[idx:idx+3,:,:], IMAGE_SIZE) for idx in range(int(np.ceil(obs_image.shape[0]/3)))]
-
-            example = tf.train.Example(
-                features=tf.train.Features(
-                    feature={
-                        "obs": tensor_feature(obs),
-                        "lang": tensor_feature(lang),
-                    }
-                )
-            )
-            writer.write(example.SerializeToString())
-        except Exception as e:
-            import sys
-            import traceback
-
-            traceback.print_exc()
-            logging.error(f"Error processing {idx}")
-            sys.exit(1)
-
-        # global_tqdm.update(1)
-
-    writer.close()
-    # global_tqdm.write(f"Finished {output_path}")
-
+    outs = []
+    for idx in range(len(lang)):
+        out = dict()
+        out["lang"] = lang[idx]
+        out["varied_lang"] = varied_lang[idx]
+        print(type(out["varied_lang"]))
+        try:
+            out["obs"] = images[idx*CHUNK_SIZE:(idx+1)*CHUNK_SIZE]
+        except: 
+            out["obs"] = images[idx*CHUNK_SIZE:]
+        outs.append(out)
+    
+    return outs
 
 def get_traj_paths(path, train_proportion):
     train_traj = []
     val_traj = []
-
-    all_traj = glob.glob(path)
-    if not all_traj:
-        logging.info(f"no trajs found in {path}")
-
+    for dataset_dir in INDOOR_DATASETS:
+        search_path = os.path.join(path, "*")
+        all_traj = glob.glob(search_path)
+        if not all_traj: 
+            logging.info(f"no trajs found in {search_path}")
+            continue
     random.shuffle(all_traj)
     train_traj += all_traj[: int(len(all_traj) * train_proportion)]
     val_traj += all_traj[int(len(all_traj) * train_proportion) :]
 
     return train_traj, val_traj
 
+# create a tfrecord for a group of trajectories
+def create_tfrecord(paths, output_path, tqdm_func, global_tqdm):
+    writer = tf.io.TFRecordWriter(output_path)
+    for path in paths: 
+        
+        outs = process_trajs(path)
 
-def main(_):
+        for out in outs:
+            try: 
+                example = tf.train.Example(
+                    features=tf.train.Features(
+                        feature={
+                            k: tensor_feature(v) for k, v in flatten_dict(out).items()
+                        }
+                    )
+                )
+                writer.write(example.SerializeToString())
+            except Exception as e:
+                import sys
+                import traceback
+
+                traceback.print_exc()
+                logging.error(f"Error processing {path}")
+                sys.exit(1)
+
+        global_tqdm.update(1)
+
+    writer.close()
+    global_tqdm.write(f"Finished {output_path}")
+
+def main(_argv):
     assert FLAGS.depth >= 1
 
     if tf.io.gfile.exists(FLAGS.output_path):
@@ -189,65 +176,26 @@ def main(_):
             return
 
     # each path is a directory that contains dated directories
-    paths = glob.glob(os.path.join(FLAGS.input_path, *("*" * (FLAGS.depth - 1))))
-    # Should only be sacson 
-    print(paths)
+    paths = [os.path.join(FLAGS.input_path, dataset_dir) for dataset_dir in INDOOR_DATASETS]
 
-    ## Load configs
-    with open("defaults.yaml", "r") as f:
-        default_config = yaml.safe_load(f)
-
-    config = default_config
-
-    with open(FLAGS.config, "r") as f:
-        user_config = yaml.safe_load(f)
-    
-    config.update(user_config)
-
-    dataset_name = FLAGS.input_path.split("/")[-1]
-
-    data_config = config["datasets"][dataset_name]
-    if "negative_mining" not in data_config:
-        data_config["negative_mining"] = True
-    if "goals_per_obs" not in data_config:
-        data_config["goals_per_obs"] = 1
-    if "end_slack" not in data_config:
-        data_config["end_slack"] = 0
-    if "waypoint_spacing" not in data_config:
-        data_config["waypoint_spacing"] = 1
-
-    train_dataset = []
-    test_dataset = []
-    dataset_name = paths[0].split("/")[-1]
-    for data_split_type in ["train", "test"]:
-        if data_split_type in data_config:
-            dataset = ViNT_Dataset(
-                data_folder=data_config["data_folder"],
-                data_split_folder=data_config[data_split_type],
-                dataset_name=dataset_name,
-                image_size=config["image_size"],
-                waypoint_spacing=data_config["waypoint_spacing"],
-                min_dist_cat=config["distance"]["min_dist_cat"],
-                max_dist_cat=config["distance"]["max_dist_cat"],
-                min_action_distance=config["action"]["min_dist_cat"],
-                max_action_distance=config["action"]["max_dist_cat"],
-                negative_mining=data_config["negative_mining"],
-                len_traj_pred=config["len_traj_pred"],
-                learn_angle=config["learn_angle"],
-                context_size=config["context_size"],
-                context_type=config["context_type"],
-                end_slack=data_config["end_slack"],
-                goals_per_obs=data_config["goals_per_obs"],
-                normalize=config["normalize"],
-                goal_type=config["goal_type"],
+    # get trajecotry paths in parallel
+    with Pool(FLAGS.num_workers) as p:
+        train_paths, val_paths = zip(
+            *p.map(
+                partial(get_traj_paths, train_proportion=FLAGS.train_proportion), paths
             )
-            if data_split_type == "train":
-                train_dataset = dataset
-            else:
-                test_dataset = dataset
+        )
+    train_paths = [x for y in train_paths for x in y]
+    val_paths = [x for y in val_paths for x in y]
+    random.shuffle(train_paths)
+    random.shuffle(val_paths)
+
     # shard paths
-    train_shards = [Subset(train_dataset, np.arange(int((i-1)*FLAGS.shard_size), int(i*FLAGS.shard_size))) for i in range(int(np.ceil(len(train_dataset) / FLAGS.shard_size)))]
-    val_shards = [Subset(test_dataset, np.arange(int((i-1)*FLAGS.shard_size), int(i*FLAGS.shard_size))) for i in range(int(np.ceil(len(test_dataset) / FLAGS.shard_size)))]
+    train_shards = np.array_split(
+        train_paths, np.ceil(len(train_paths) / FLAGS.shard_size)
+    )
+    val_shards = np.array_split(val_paths, np.ceil(len(val_paths) / FLAGS.shard_size))
+
     # create output paths
     tf.io.gfile.makedirs(os.path.join(FLAGS.output_path, "train"))
     tf.io.gfile.makedirs(os.path.join(FLAGS.output_path, "val"))
@@ -259,32 +207,30 @@ def main(_):
         os.path.join(FLAGS.output_path, "val", f"{i}.tfrecord")
         for i in range(len(val_shards))
     ]
-    print("Starting create tfrecord tasks")
+
     # create tasks (see tqdm_multiprocess documenation)
-    for (shard, tf_path) in tqdm.tqdm(zip(train_shards, train_output_paths), total=len(train_shards)):
-        create_tfrecord(shard, tf_path)
-    
-    for (shard, tf_path) in tqdm.tqdm(zip(val_shards, val_output_paths), total=len(val_shards)):
-        create_tfrecord(shard, tf_path)
-    # tasks = []
-    #     (create_tfrecord, (train_shards[i], train_output_paths[i]))
-    #     for i in range(len(train_shards))
-    # ] + [
-    #     (create_tfrecord, (val_shards[i], val_output_paths[i]))
-    #     for i in range(len(val_shards))
-    # ]
+    tasks = [
+        (create_tfrecord, (train_shards[i], train_output_paths[i]))
+        for i in range(len(train_shards))
+    ] + [
+        (create_tfrecord, (val_shards[i], val_output_paths[i]))
+        for i in range(len(val_shards))
+    ]
 
     # run tasks
-    # pool = TqdmMultiProcessPool(FLAGS.num_workers)
-    # with tqdm.tqdm(
-    #     total=len(train_dataset) + len(test_dataset),
-    #     dynamic_ncols=True,
-    #     position=0,
-    #     desc="Total progress",
-    # ) as pbar:
-    #     pool.map(pbar, tasks, lambda _: None, lambda _: None)
+    pool = TqdmMultiProcessPool(FLAGS.num_workers)
+    with tqdm.tqdm(
+        total=len(train_paths) + len(val_paths),
+        dynamic_ncols=True,
+        position=0,
+        desc="Total progress",
+    ) as pbar:
+        pool.map(pbar, tasks, lambda _: None, lambda _: None)
 
 
 if __name__ == "__main__":
-    app.run(main)
+    try:
+        app.run(main)
+    except SystemExit:
+        pass
 
