@@ -55,9 +55,13 @@ flags.DEFINE_float(
 flags.DEFINE_integer("num_workers", 8, "Number of threads to use")
 flags.DEFINE_integer("shard_size", 200, "Maximum number of trajectories per shard")
 
-INDOOR_DATASETS = ["sacson", "cory_hall", "go_stanford_cropped"]
+# INDOOR_DATASETS = ["sacson", "cory_hall", "go_stanford_cropped", "scand"]
+INDOOR_DATASETS = ["sacson"]
+# INDOOR_DATASETS = ["sacson", "cory_hall", "go_stanford_cropped", "go_stanford2"]
+MODE = "PER CLASS"
+single_class = "Stop"
 
-IMAGE_SIZE = (128, 128)
+IMAGE_SIZE = (120, 160)
 
 def tensor_feature(value):
     return tf.train.Feature(
@@ -97,40 +101,74 @@ def process_images(path):
 def process_trajs(path):
     # load_data
     fp = os.path.join(path, "traj_data_language.pkl")
-    with open(fp, "rb") as f:
-        data = pickle.load(f)
-    
-    images = process_images(path)
-    lang = data["language_instructions"]
-    varied_lang = data["varied_language_instructions"]
-    CHUNK_SIZE = data["chunk_size"]
+    if os.path.exists(fp):
 
-    outs = []
-    for idx in range(len(lang)):
-        out = dict()
-        out["lang"] = lang[idx]
-        out["varied_lang"] = varied_lang[idx]
-        print(type(out["varied_lang"]))
-        try:
-            out["obs"] = images[idx*CHUNK_SIZE:(idx+1)*CHUNK_SIZE]
-        except: 
-            out["obs"] = images[idx*CHUNK_SIZE:]
-        outs.append(out)
+        with open(fp, "rb") as f:
+            data = pickle.load(f)
+        
+        images = process_images(path)
+        lang = data["language_instructions"]
+        varied_lang = data["varied_language_instructions"]
+        CHUNK_SIZE = data["chunk_size"]
+
+        outs = []
+        for idx in range(len(lang)):
+            out = dict()
+            out["lang"] = lang[idx]
+            out["varied_lang"] = varied_lang[idx]
+            if MODE == "PER CLASS":
+                if out["lang"] == single_class:
+                    try:
+                        out["obs"] = images[idx*CHUNK_SIZE:(idx+1)*CHUNK_SIZE]
+                    except: 
+                        out["obs"] = images[idx*CHUNK_SIZE:]
+                    outs.append(out)
+            else:
+                try:
+                    out["obs"] = images[idx*CHUNK_SIZE:(idx+1)*CHUNK_SIZE]
+                except: 
+                    out["obs"] = images[idx*CHUNK_SIZE:]
+                outs.append(out)
     
-    return outs
+        return outs
+    else:
+        return []
 
 def get_traj_paths(path, train_proportion):
     train_traj = []
     val_traj = []
-    for dataset_dir in INDOOR_DATASETS:
-        search_path = os.path.join(path, "*")
-        all_traj = glob.glob(search_path)
-        if not all_traj: 
-            logging.info(f"no trajs found in {search_path}")
-            continue
-    random.shuffle(all_traj)
-    train_traj += all_traj[: int(len(all_traj) * train_proportion)]
-    val_traj += all_traj[int(len(all_traj) * train_proportion) :]
+    dataset_dir = path.split("/")[-1]
+    search_path = os.path.join(path, "*")
+    all_traj = glob.glob(search_path)
+    print("before: ", len(all_traj))
+    # if dataset_dir == "sacson":
+    #     all_traj = [x for x in all_traj if x.split("/")[-1].split("-")[3] != "cory1"]
+    #     print("len after filtering sacson: ")
+    #     print(len(all_traj))
+    if dataset_dir == "go_stanford_cropped":
+        all_traj = [x for x in all_traj if x.split("/")[-1][:3] != "sim"]
+        print("len after filtering stanford: ")
+        print(len(all_traj))
+
+
+    if not all_traj: 
+        logging.info(f"no trajs found in {search_path}")
+
+    if len(INDOOR_DATASETS) > 1:
+        random.shuffle(all_traj)
+        if dataset_dir == "sacson" or dataset_dir == "cory_hall" or dataset_dir == "go_stanford2":
+            train_traj += all_traj
+        else: 
+            val_traj += all_traj
+            
+        np.random.shuffle(train_traj)
+        np.random.shuffle(val_traj)
+        print("Train: ", len(train_traj))
+        print("Val: ", len(val_traj))
+    else:
+        np.random.shuffle(all_traj)
+        train_traj += all_traj[: int(len(all_traj) * train_proportion)]
+        val_traj += all_traj[int(len(all_traj) * train_proportion) :]
 
     return train_traj, val_traj
 
@@ -160,7 +198,6 @@ def create_tfrecord(paths, output_path, tqdm_func, global_tqdm):
                 sys.exit(1)
 
         global_tqdm.update(1)
-
     writer.close()
     global_tqdm.write(f"Finished {output_path}")
 
@@ -174,7 +211,7 @@ def main(_argv):
         else:
             logging.info(f"{FLAGS.output_path} exists, exiting")
             return
-
+    print(f"USING MODE: {MODE} and CLASS: {single_class}")
     # each path is a directory that contains dated directories
     paths = [os.path.join(FLAGS.input_path, dataset_dir) for dataset_dir in INDOOR_DATASETS]
 
@@ -194,33 +231,43 @@ def main(_argv):
     train_shards = np.array_split(
         train_paths, np.ceil(len(train_paths) / FLAGS.shard_size)
     )
-    val_shards = np.array_split(val_paths, np.ceil(len(val_paths) / FLAGS.shard_size))
 
     # create output paths
     tf.io.gfile.makedirs(os.path.join(FLAGS.output_path, "train"))
-    tf.io.gfile.makedirs(os.path.join(FLAGS.output_path, "val"))
+    
     train_output_paths = [
         os.path.join(FLAGS.output_path, "train", f"{i}.tfrecord")
         for i in range(len(train_shards))
     ]
-    val_output_paths = [
-        os.path.join(FLAGS.output_path, "val", f"{i}.tfrecord")
-        for i in range(len(val_shards))
-    ]
 
-    # create tasks (see tqdm_multiprocess documenation)
-    tasks = [
+    if len(val_paths) != 0:
+        val_shards = np.array_split(val_paths, np.ceil(len(val_paths) / FLAGS.shard_size))
+        tf.io.gfile.makedirs(os.path.join(FLAGS.output_path, "val"))
+
+        val_output_paths = [
+            os.path.join(FLAGS.output_path, "val", f"{i}.tfrecord")
+            for i in range(len(val_shards))
+            ]
+        # create tasks (see tqdm_multiprocess documenation)
+        tasks = [
         (create_tfrecord, (train_shards[i], train_output_paths[i]))
         for i in range(len(train_shards))
-    ] + [
+        ] + [
         (create_tfrecord, (val_shards[i], val_output_paths[i]))
         for i in range(len(val_shards))
-    ]
+        ]
+        total_len = len(train_paths) + len(val_paths)
 
+    else:
+        tasks = [
+            (create_tfrecord, (train_shards[i], train_output_paths[i]))
+            for i in range(len(train_shards))
+        ]
+        total_len = len(train_paths)
     # run tasks
     pool = TqdmMultiProcessPool(FLAGS.num_workers)
     with tqdm.tqdm(
-        total=len(train_paths) + len(val_paths),
+        total=total_len,
         dynamic_ncols=True,
         position=0,
         desc="Total progress",
