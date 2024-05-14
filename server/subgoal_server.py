@@ -75,8 +75,11 @@ diffusion_sample = create_sample_fn(
         0.0,
         PRETRAINED_PATH,
     )
-client = OpenAI(api_key="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",
-                    organization = "org-DVvr1sZ47CRxHpehToN6IVdR")
+
+OPENAI_KEY = os.environ.get("OPENAI_KEY")
+ORGANIZATION_ID = os.environ.get("ORGANIZATION_ID")
+client = OpenAI(api_key=OPENAI_KEY,
+                    organization = ORGANIZATION_ID)
 gpt_model = gpt_model
 
 @app.route('/gen_subgoal', methods=["POST"])
