@@ -1,3 +1,4 @@
 deployment/model_weights/
-deployment/pycache/ 
+deployment/__pycache__/
+deployment/models/nomad/__pycache__/
 deployment/topomaps/*
