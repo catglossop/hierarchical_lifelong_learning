@@ -1,0 +1,3 @@
+deployment/model_weights/
+deployment/pycache/ 
+deployment/topomaps/*
