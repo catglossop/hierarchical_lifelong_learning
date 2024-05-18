@@ -62,7 +62,7 @@ diffusion_num_steps = 50
 num_samples = 10
 
 # Import OpenAI params 
-gpt_model = "gpt-4-turbo"
+gpt_model = "gpt-4o"
 ##############################################################################
 app = Flask(__name__)
 

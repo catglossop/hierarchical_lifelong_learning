@@ -1,0 +1,3 @@
+[submodule "agentlace"]
+	path = agentlace
+	url = https://github.com/youliangtan/agentlace.git

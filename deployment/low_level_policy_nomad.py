@@ -33,9 +33,9 @@ from deployment.topic_names import (IMAGE_TOPIC,
 
 # CONSTANTS
 TOPOMAP_IMAGES_DIR = "topomaps/images"
-ROBOT_CONFIG_PATH ="../../deployment/config/robot.yaml"
-MODEL_CONFIG_PATH = "../../deployment/config/models.yaml"
-DATA_CONFIG = "../../deployment/config/data_config.yaml"
+ROBOT_CONFIG_PATH ="../../../deployment/config/robot.yaml"
+MODEL_CONFIG_PATH = "../../../deployment/config/models.yaml"
+DATA_CONFIG = "../../../deployment/config/data_config.yaml"
 
 
 
@@ -133,6 +133,7 @@ class LowLevelPolicy(Node):
             model_paths = yaml.safe_load(f)
 
         model_config_path = model_paths["nomad"]["config_path"]
+        print(os.getcwd())
         with open(model_config_path, "r") as f:
             self.model_params = yaml.safe_load(f)
 

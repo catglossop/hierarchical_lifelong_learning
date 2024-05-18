@@ -58,11 +58,11 @@ class SubGoalClient(Node):
         self.timer = self.create_timer(0.5, self.timer_callback)
         self.bridge = CvBridge()
 
-    def msg_to_pil(self, msg: PILImage) -> PILImage.Image:
-        img = np.frombuffer(msg.data, dtype=np.uint8).reshape(
-            msg.height, msg.width, -1)
-        pil_image = PILImage.fromarray(img)
-        return pil_image
+    # def msg_to_pil(self, msg: PILImage) -> PILImage.Image:
+    #     img = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+    #         msg.height, msg.width, -1)
+    #     pil_image = PILImage.fromarray(img)
+    #     return pil_image
     
     def obs_callback(self, obs_msg):
         print("In obs callback")
@@ -96,7 +96,7 @@ class SubGoalClient(Node):
         return subgoal
     
     def timer_callback(self):
-        if self.obs is not None and self.act_status:
+        if self.obs is not None and self.reached_goal:
             print("Valid observation available...")
             imageio.imwrite(f"/home/create/curr_obs_go_forward.png", self.obs)
             self.subgoal = self.send_image_to_server(self.obs)

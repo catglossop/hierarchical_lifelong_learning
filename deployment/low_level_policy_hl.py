@@ -10,14 +10,23 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 import matplotlib.pyplot as plt
 import yaml
 import threading
+import random
+import io
+import base64
+import requests
+import tensorflow as tf
 
 # ROS
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import Bool, Float32MultiArray
-from deployment.utils import msg_to_pil, to_numpy, transform_images, load_model
+from nav_msgs.msg import Odometry
+from irobot_create_msgs.msg import Dock
+from rclpy.action import ActionClient
+from irobot_create_msgs.action import Undock
 
+from deployment.utils import msg_to_pil, to_numpy, transform_images, load_model
 import torch
 from PIL import Image as PILImage
 import numpy as np
@@ -31,14 +40,23 @@ from deployment.topic_names import (IMAGE_TOPIC,
                         SAMPLED_ACTIONS_TOPIC, 
                         REACHED_GOAL_TOPIC)
 
+# AgentLACE
+from agentlace.data.data_store import QueuedDataStore
+from agentlace.trainer import TrainerClient
+
+from hierarchical_lifelong_learning.deployment.task_utils import (
+    make_trainer_config,
+    observation_format, 
+    rlds_data_format
+)
+
 
 # CONSTANTS
 TOPOMAP_IMAGES_DIR = "topomaps/images"
 ROBOT_CONFIG_PATH ="../../deployment/config/robot.yaml"
 MODEL_CONFIG_PATH = "../../deployment/config/models.yaml"
 DATA_CONFIG = "../../deployment/config/data_config.yaml"
-
-
+PRIMITIVES = ["Turn left", "Turn right", "Go straight", "Stop"]
 
 class LowLevelPolicy(Node): 
 
@@ -49,6 +67,12 @@ class LowLevelPolicy(Node):
         self.args = args
         self.context_queue = []
         self.context_size = None
+        self.server_ip = args.ip
+        self.SERVER_ADDRESS = f"http://{self.server_ip}:5001/gen_subgoal"
+        self.subgoal_timeout = 10 # This is partially for debugging
+        
+        self.image_aspect_ratio = (4/3)
+        self.starting_traj = True
 
         # Load the model 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -58,11 +82,18 @@ class LowLevelPolicy(Node):
         # Load the config
         self.load_config(ROBOT_CONFIG_PATH)
 
-        # Load the topomap
-        # self.load_topomap(TOPOMAP_IMAGES_DIR)
-
         # Load data config
         self.load_data_config()
+
+        # INFRA FOR SAVING DATA
+        self.local_data_store = QueuedDataStore(capacity=100)
+        self.trainer = TrainerClient(
+            "lifelong_data",
+            self.server_ip,
+            make_trainer_config(),
+            self.local_data_store,
+            wait_for_server=True,
+        )
 
         self.irobot_qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT, 
@@ -84,6 +115,12 @@ class LowLevelPolicy(Node):
             "/hierarchical_learning/subgoal",
             self.subgoal_callback, 
             self.irobot_qos_profile)
+        self.dock_msg = Dock()
+        self.dock_sub = self.create_subscription(
+            Dock, 
+            "/dock",
+            self.dock_callback,
+            self.irobot_qos_profile)
         
         # PUBLISHERS
         self.reached_goal = False
@@ -91,6 +128,11 @@ class LowLevelPolicy(Node):
         self.reached_goal_pub = self.create_publisher(
             Bool, 
             REACHED_GOAL_TOPIC, 
+            1)
+        self.reset = False 
+        self.reset_sub = self.create_subscription(
+            Bool, 
+            "/hierarchical_learning/reset",
             1)
         self.sampled_actions_msg = Float32MultiArray()
         self.sampled_actions_pub = self.create_publisher(
@@ -102,19 +144,30 @@ class LowLevelPolicy(Node):
             Float32MultiArray, 
             WAYPOINT_TOPIC, 
             1) 
-        self.act_status = True 
-        self.act_status_msg = Bool()
-        self.act_status_pub = self.create_publisher(
-            Bool, 
-            "/hierarchical_learning/act_status", 
-            1
-        ) 
+        self.odom_msg = Odometry()
+        self.current_pos = None 
+        self.current_yaw = None 
+        self.odom_sub = self.create_subscription(
+            Odometry, 
+            "/odom",
+            self.odom_callback,
+            1)
         
         # TIMERS
         self.timer_period = 1/self.RATE  # seconds
         self.timer = self.create_timer(self.timer_period, self.timer_callback)
+        self.undock_action_client = ActionClient(self, Undock, 'undock')
     
     # Utils
+    def image_to_base64(self, image):
+        buffer = io.BytesIO()
+        # Convert the image to RGB mode if it's in RGBA mode
+        if image.mode == 'RGBA':
+            image = image.convert('RGB')
+        image.save(buffer, format="JPEG")
+        img_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        return img_str
+    
     def unnormalize_data(self, ndata, stats):
         ndata = (ndata + 1) / 2
         data = ndata * (stats['max'] - stats['min']) + stats['min']
@@ -136,6 +189,21 @@ class LowLevelPolicy(Node):
         actions = np.cumsum(ndeltas, axis=1)
         return torch.from_numpy(actions).to(self.device)
 
+    def transform_image_to_string(self, pil_img, image_size, center_crop=False):
+        """Transforms a PIL image to a torch tensor."""
+        w, h = pil_img.size
+        if center_crop: 
+            if w > h:
+                pil_img = TF.center_crop(pil_img, (h, int(h * self.image_aspect_ratio)))
+            else:
+                pil_img = TF.center_crop(pil_img, (int(w / self.image_aspect_ratio), w))
+        pil_img = pil_img.resize(image_size)
+        image_bytes_io = io.BytesIO()
+        PILImage.fromarray(np.array(self.obs)).save(image_bytes_io, format = 'JPEG')
+        image_bytes = tf.constant(image_bytes_io.getvalue(), dtype = tf.string)
+        return image_bytes
+
+    # Loading 
     def load_config(self, robot_config_path):
         with open(robot_config_path, "r") as f:
             robot_config = yaml.safe_load(f)
@@ -145,8 +213,6 @@ class LowLevelPolicy(Node):
         self.DT = 1/robot_config["frame_rate"]
         self.RATE = robot_config["frame_rate"]
         self.EPS = 1e-8
-        self.WAYPOINT_TIMEOUT = 1 # seconds # TODO: tune this
-        self.FLIP_ANG_VEL = np.pi/4
     
     def load_model_from_config(self, model_paths_config):
         # Load configs
@@ -180,26 +246,7 @@ class LowLevelPolicy(Node):
             clip_sample=True,
             prediction_type='epsilon'
         )
-    
-    def load_topomap(self, topomap_images_dir):
-        # Load topomap
-        topomap_filenames = sorted(os.listdir(os.path.join(
-            topomap_images_dir, self.args.dir)), key=lambda x: int(x.split(".")[0]))
-        topomap_dir = f"{TOPOMAP_IMAGES_DIR}/{self.args.dir}"
-        self.num_nodes = len(os.listdir(topomap_dir))
-        self.topomap = []
-        for i in range(self.num_nodes):
-            image_path = os.path.join(topomap_dir, topomap_filenames[i])
-            self.topomap.append(PILImage.open(image_path))
         
-        self.closest_node = 0
-        assert -1 <= self.args.goal_node < len(self.topomap), "Invalid goal index"
-        if self.args.goal_node == -1:
-            self.goal_node = len(self.topomap) - 1
-        else:
-            self.goal_node = self.args.goal_node
-        self.reached_goal = False
-    
     def load_data_config(self):
         # LOAD DATA CONFIG
         with open(os.path.join(os.path.dirname(__file__), DATA_CONFIG), "r") as f:
@@ -209,9 +256,43 @@ class LowLevelPolicy(Node):
         for key in data_config['action_stats']:
             self.ACTION_STATS[key] = np.array(data_config['action_stats'][key])
 
+    # TODO: add subscription to VLM planner to get the goal
+    def send_image_to_server(self, image: PILImage.Image) -> dict:
+        image_base64 = self.image_to_base64(image)
+        prompt = random.choice(PRIMITIVES)
+        data = {
+            'curr': image_base64,
+            'hl_prompt': prompt,
+            'll_prompt': prompt,
+        }
+        response = requests.post(self.SERVER_ADDRESS, json=data, timeout=99999999)
+        data = response.json()
+        img_data = base64.b64decode(data['goal'])
+        subgoal = PILImage.open(io.BytesIO(img_data))
+        subgoal = np.array(subgoal)
+        return subgoal
+
+    def send_undock(self):
+        goal_msg = Undock.Goal()
+        
+        self.undock_action_client.wait_for_server()
+
+        return self.undock_action_client.send_goal_async(goal_msg)
+    
+    def dock_callback(self, msg):
+        self.is_docked = msg.is_docked
+
+    def state_callback(self, msg):
+        self.state = msg.data
+
+    def odom_callback(self, odom_msg: Odometry):
+        """Callback function for the odometry subscriber"""
+        self.current_yaw = odom_msg.pose.pose.orientation.z
+        self.current_pos = np.array([odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y])
+        
     def image_callback(self, msg):
         self.image_msg = msg_to_pil(msg)
-        img = self.image_msg.save("test_image.jpg")
+        self.obs_bytes = self.transform_image_to_string(self.image_msg)
         if self.context_size is not None:
             if len(self.context_queue) < self.context_size + 1:
                 self.context_queue.append(self.image_msg)
@@ -225,7 +306,7 @@ class LowLevelPolicy(Node):
         self.act_status = False
     
     def process_images(self):
-        self.obs_images = transform_images(self.context_queue, self.model_params["image_size"], center_crop=False)
+        self.obs_images = transform_images(self.context_queue, self.model_params["image_size"], center_crop=True)
         self.obs_images = torch.split(self.obs_images, 3, dim=1)
         self.obs_images = torch.cat(self.obs_images, dim=1) 
         self.obs_images = self.obs_images.to(self.device)
@@ -242,7 +323,7 @@ class LowLevelPolicy(Node):
 
         self.dists = self.model("dist_pred_net", obsgoal_cond=self.obsgoal_cond)
         self.dists = to_numpy(self.dists.flatten())
-        print("DISTANCES: ", self.dists)
+        print("DISTANCE TO SUBGOAL: ", self.dists[0])
 
         # infer action
         with torch.no_grad():
@@ -289,22 +370,74 @@ class LowLevelPolicy(Node):
     def timer_callback(self):
 
         self.chosen_waypoint = np.zeros(4, dtype=np.float32)
-        if len(self.context_queue) > self.model_params["context_size"] and self.subgoal_image is not None:
-            self.act_status = False
-            # Process observations
-            self.process_images()
+        if len(self.context_queue) > self.model_params["context_size"] and not self.is_docked:
 
-            # Get goal image
-            self.goal_image = transform_images(self.subgoal_image, self.model_params["image_size"], center_crop=False).to(self.device)
+            if not self.wait_for_reset: 
+                # Process observations
+                self.process_images()
 
-            # Use policy to get actions
-            self.infer_actions()
+                # Check if goal reached
+                if self.dists[0] < 10: 
+                    self.reached_goal = True
+                
+                # Get goal image
+                self.goal_image = transform_images(self.subgoal_image, self.model_params["image_size"], center_crop=False).to(self.device)
 
-            # Check if goal reached
-            if self.dists[0] < 10: 
-                self.act_status = True
-            self.act_status_msg.data = self.act_status
-            self.act_status_pub.publish(self.act_status_msg)
+                # Use policy to get actions
+                self.infer_actions()
+                if DEBUG: 
+                    print("Traj dur: ", self.traj_duration)
+                    print("Current state: ", self.state)
+                    print("Goal reached: ", self.reached_goal)
+                    print("Wait for reset: ", self.wait_for_reset)
+                if self.traj_duration > self.subgoal_timeout:
+                    self.traj_duration = 0
+                    self.is_terminal = True 
+                    self.status = "timeout"
+                elif self.state == "reset":
+                    self.traj_duration = 0
+                    self.is_terminal = True 
+                    self.status = "crash"
+                    self.wait_for_reset = True 
+                elif self.reached_goal:
+                    self.traj_duration = 0
+                    self.is_terminal = True 
+                    self.status = "reached_goal"
+                elif self.state in ["idle", "nav_to_dock", "dock", "undock", "teleop"]:
+                    self.traj_duration = 0
+                    self.is_terminal = True
+                    self.status = "manual"
+                    self.wait_for_reset = True
+                else:
+                    self.is_terminal = False
+                    self.status = "running"
+
+                self.curr_obs = {
+                    "obs" : self.obs_bytes, 
+                    "position" : self.current_pos,
+                    "yaw": self.current_yaw, 
+                }
+                formatted_obs = {
+                    "observation": self.curr_obs,
+                    "goal": self.goal_bytes
+                    "is_first": self.starting_traj,
+                    "is_last": is_terminal,
+                    "is_terminal": is_terminal,
+                    "status": self.status
+                }
+                if self.starting_traj: 
+                    self.starting_traj = False 
+                self.data_store.insert(formatted_obs)
+                self.traj_duration += 1
+
+            if self.reached_goal or self.traj_duration > self.subgoal_timeout or (self.state == "do_task" and self.wait_for_reset): 
+                # Update the goal image
+                self.subgoal_image = self.send_image_to_server(self.image_msg)
+                self.subgoal_image = np.array(self.subgoal).astype(np.uint8)
+                self.goal_bytes = self.transform_image_to_string(PILImage.fromarray(self.subgoal_image))
+                self.starting_traj = True
+                self.reached_goal = False
+                self.wait_for_reset = False
 
         # Normalize and publish waypoint
         if self.model_params["normalize"]:
@@ -319,6 +452,8 @@ class LowLevelPolicy(Node):
 def main(args):
     rclpy.init()
     low_level_policy = LowLevelPolicy(args)
+    while low_level_policy.is_docked:
+        low_level_policy.send_undock()
 
     rclpy.spin(low_level_policy)
     low_level_policy.destroy_node()
@@ -382,6 +517,12 @@ if __name__ == "__main__":
         default=8,
         type=int,
         help=f"Number of actions sampled from the exploration model (default: 8)",
+    )
+    parser.add_argument(
+        "--ip", 
+        "-i", 
+        default="localhost",
+        type=str,
     )
     args = parser.parse_args()
     main(args)
