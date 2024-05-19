@@ -94,13 +94,14 @@ for img in os.listdir(context_image_folder):
 
 PRIMITIVES = ["Go forward", "Turn left", "Turn right", "Stop"]
 TASKS = ["Go down the hallway", "Go to the chair", "Go to the kitchen"]
-initial_context = f"A robot is moving through an indoor environment. It is being given language tasks which include the primitive actions {(", ").join(PRIMITIVES)} and the higher level tasks {(", ").join(TASKS)}. 
-                    The robot has a model that can generate image subgoals conditioned on a language instruction. We provide examples of good observation and generated subgoal pairs. 
-                    The first image is the observation and the second is corresponding generated subgoal image for the primitive {PRIMITIVES[0]}.
+initial_context = f"""A robot is moving through an indoor environment. It is being given language tasks which include the primitive actions {(", ").join(PRIMITIVES)}
+                    and the higher level tasks {(", ").join(TASKS)}. The robot has a model that can generate image subgoals conditioned on a language instruction. 
+                    We provide examples of good observation and generated subgoal pairs. 
+                    The first image is the observation and the second is corresponding generated subgoal image for the primitive {PRIMITIVES[0]}. 
                     The third image is the observation and the fourth is corresponding generated subgoal image for the primitive {PRIMITIVES[1]}.
                     The fifth image is the observation and the sixth is corresponding generated subgoal image for the primitive {PRIMITIVES[2]}. 
                     The seventh image is the observation and the eighth is corresponding generated subgoal image for the primitive {PRIMITIVES[3]}. 
-                    There does not need to be a hallway for the robot to go down in the observation. The robot can be in any location in the environment." 
+                    There does not need to be a hallway for the robot to go down in the observation. The robot can be in any location in the environment.""" 
 initial_message = {
     "role": "user",
     "content": [
