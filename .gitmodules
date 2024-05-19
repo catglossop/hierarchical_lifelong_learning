@@ -1,3 +1,6 @@
 [submodule "agentlace"]
 	path = agentlace
 	url = https://github.com/youliangtan/agentlace.git
+[submodule "dlimp"]
+	path = dlimp
+	url = https://github.com/catglossop/dlimp.git
