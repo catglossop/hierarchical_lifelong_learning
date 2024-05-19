@@ -179,11 +179,11 @@ def generate_subgoal():
     gen_subgoal_64 = image_to_base64(Image.fromarray(gen_subgoal))
     while not gpt_approved and idx < max_samples:
         print("Diffusion sample: ", idx)
-        current_context = f"The ID of this message is {idx}. A robot is trying to perform the high level task {hl_prompt}. It is currently executing the low level task {ll_prompt}. 
+        current_context = f"""The ID of this message is {idx}. A robot is trying to perform the high level task {hl_prompt}. It is currently executing the low level task {ll_prompt}. 
                             The first image is the robot's current observation and the second image is the the goal image for the low level prompt. 
                             Is this goal image consistent with the current observation, high level task, and low level task? 
                             Respond in the form 'YES: [insert an explaination of why this subgoal is good]' if yes and 
-                            'NO: [insert an explaination of why the subgoal is bad]' if no."
+                            'NO: [insert an explaination of why the subgoal is bad]' if no."""
         current_message = {
             "role": "user",
             "content": [
@@ -225,9 +225,9 @@ def generate_subgoal():
     # Reset the context buffer
     samples_descrip_processed = (" ").join(samples_descrip)
     print(samples_descrip_processed)
-    fallback_context = f"A robot is trying to perform the high level task {hl_prompt}. It is currently executing the low level task {ll_prompt}. 
+    fallback_context = f"""A robot is trying to perform the high level task {hl_prompt}. It is currently executing the low level task {ll_prompt}. 
                         {max_samples} subgoals were generated for this task and all of them were deemed not good enough. 
-                        Choose the best option from the previous examples and return the ID of the best option. The response must only contain the ID of the best option."
+                        Choose the best option from the previous examples and return the ID of the best option. The response must only contain the ID of the best option."""
     fallback_message = {
         "role": "user",
         "content": [
