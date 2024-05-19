@@ -83,6 +83,14 @@ client = OpenAI(api_key=OPENAI_KEY,
 gpt_model = gpt_model
 message_buffer = []
 
+def image_to_base64(image):
+    buffer = BytesIO()
+    # Convert the image to RGB mode if it's in RGBA mode
+    if image.mode == 'RGBA':
+        image = image.convert('RGB')
+    image.save(buffer, format="JPEG")
+    img_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return img_str
 
 ## Load in the context images
 context_image_folder = "/nfs/nfs2/users/cglossop/context_images"
@@ -90,8 +98,6 @@ context_images = {}
 for img in os.listdir(context_image_folder):
     context_images[img.split(".")[0]] = image_to_base64(Image.open(os.path.join(context_image_folder, img)))
     
-
-
 PRIMITIVES = ["Go forward", "Turn left", "Turn right", "Stop"]
 TASKS = ["Go down the hallway", "Go to the chair", "Go to the kitchen"]
 initial_context = f"""A robot is moving through an indoor environment. It is being given language tasks which include the primitive actions {(", ").join(PRIMITIVES)}
@@ -249,15 +255,6 @@ def generate_subgoal():
     text_file.close()
     return response
 
-
-def image_to_base64(image):
-    buffer = BytesIO()
-    # Convert the image to RGB mode if it's in RGBA mode
-    if image.mode == 'RGBA':
-        image = image.convert('RGB')
-    image.save(buffer, format="JPEG")
-    img_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
-    return img_str
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
