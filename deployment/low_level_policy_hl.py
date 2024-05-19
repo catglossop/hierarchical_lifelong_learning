@@ -44,7 +44,7 @@ from deployment.topic_names import (IMAGE_TOPIC,
 from agentlace.data.data_store import QueuedDataStore
 from agentlace.trainer import TrainerClient
 
-from hierarchical_lifelong_learning.deployment.task_utils import (
+from create_ws.src.hierarchical_learning.hierarchical_lifelong_learning.train.task_utils import (
     make_trainer_config,
     observation_format, 
     rlds_data_format
