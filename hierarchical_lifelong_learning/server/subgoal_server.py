@@ -84,6 +84,7 @@ client = OpenAI(api_key=OPENAI_KEY,
                     organization = ORGANIZATION_ID)
 gpt_model = gpt_model
 message_buffer = []
+DEBUG = False 
 
 def image_to_base64(image):
     buffer = BytesIO()
@@ -177,10 +178,12 @@ def generate_subgoal():
     gen_subgoal = diffusion_sample(curr_obs_np, ll_prompt)
     time_key = datetime.now().strftime("%Y-%d-%m_%H-%M-%S")
     folder = f"gen_subgoals_{ll_prompt_mod}_{time_key}"
-    os.makedirs(folder, exist_ok=True)
-    text_file = open(os.path.join(folder, "gpt_comments.txt"), "a+")
+    if DEBUG:
+        os.makedirs(folder, exist_ok=True)
+        text_file = open(os.path.join(folder, "gpt_comments.txt"), "a+")
 
-    imageio.imwrite(os.path.join(folder, "gen_subgoal_{}.png".format(idx)), gen_subgoal)
+    if DEBUG:
+        imageio.imwrite(os.path.join(folder, "gen_subgoal_{}.png".format(idx)), gen_subgoal)
     samples_descrip = []
     samples = []
     curr_obs_64 = image_to_base64(curr_obs)
@@ -218,18 +221,21 @@ def generate_subgoal():
         # process the current response for positive or negative
         curr_response = ai_response.choices[0].message.content
         print("Response: ", curr_response)
-        text_file.write(curr_response)
+        if DEBUG:
+            text_file.write(curr_response)
         samples_descrip.append(f"{idx}: {curr_response}")
         samples.append(gen_subgoal_64)
         if ai_response.choices[0].message.content.split(":")[0] == "YES":
             gpt_approved = True
-            imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
+            if DEBUG:
+                imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
             response = jsonify(goal=gen_subgoal_64)
             message_buffer = [initial_message]
             return response
         idx += 1
         gen_subgoal = diffusion_sample(curr_obs_np, ll_prompt)
-        imageio.imwrite(os.path.join(folder, f"gen_subgoal_{idx}.png"), gen_subgoal)
+        if DEBUG:
+            imageio.imwrite(os.path.join(folder, f"gen_subgoal_{idx}.png"), gen_subgoal)
 
     # Reset the context buffer
     samples_descrip_processed = (" ").join(samples_descrip)
@@ -250,12 +256,15 @@ def generate_subgoal():
         max_tokens=300,
     )
     
-    text_file.write(ai_response.choices[0].message.content)
+    if DEBUG:
+        text_file.write(ai_response.choices[0].message.content)
     print("Selected subgoal is: ", int(ai_response.choices[0].message.content))
     gen_subgoal_selected = samples[int(ai_response.choices[0].message.content)]
-    imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
+    if DEBUG:
+        imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
     response = jsonify(goal=gen_subgoal_selected)
-    text_file.close()
+    if DEBUG:
+        text_file.close()
     message_buffer = [initial_message]
     return response
 
