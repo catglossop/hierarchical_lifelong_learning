@@ -14,9 +14,7 @@ def observation_format():
     return {
         "obs": tf.TensorSpec((), tf.string, name="image"),
         "position": tf.TensorSpec((2,), tf.float64, name="position"),
-        "yaw": tf.TensorSpec((1,), tf.float64, name="orientation"),
-        "linear_velocity": tf.TensorSpec((3,), tf.float64, name="linear_velocity"),
-        "angular_velocity": tf.TensorSpec((3,), tf.float64, name="angular_velocity"),
+        "yaw": tf.TensorSpec((), tf.float64, name="orientation"),
     }
 
 def robot_data_format():
