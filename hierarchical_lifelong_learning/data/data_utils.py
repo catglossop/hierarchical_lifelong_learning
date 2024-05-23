@@ -2,7 +2,7 @@ import numpy as np
 import os
 from PIL import Image
 from typing import Any, Iterable, Tuple
-
+from functools import partial 
 #import torch
 #from torchvision import transforms
 #import torchvision.transforms.functional as TF
@@ -10,6 +10,8 @@ from typing import Any, Iterable, Tuple
 import tensorflow as tf
 import io
 from typing import Union
+import dlimp 
+from dlimp.dataset import DLataset
 
 VISUALIZATION_IMAGE_SIZE = (160, 120)
 IMAGE_ASPECT_RATIO = (
@@ -20,15 +22,23 @@ base_instructions = ["Turn left", "Turn right", "Go forward", "Stop"]
 
 
 def compute_lang_instruc(traj, chunk_size, yaw_threshold, pos_threshold):
-
-    yaw = traj["yaw"]
-    pos = traj["position"]
-
+    traj_obs = traj["observation"]
+    yaw = traj_obs["yaw"]
+    pos = traj_obs["position"]
+    gt_lang = traj_obs["gt_lang"]
+    print(traj["_len"]) 
+    if yaw.shape[0] == None: 
+        print("No yaw values")
+        return traj
+    else:
+        print("Len of traj is: ", yaw.shape)
     num_chunks = len(yaw)//chunk_size
     yaw_chunks = np.split(yaw, num_chunks)
     pos_chunks = np.split(pos, num_chunks)
-    image_chunks = np.split(traj["obs"], num_chunks)
-
+    image_chunks = np.split(traj_obs["obs"], num_chunks)
+    gt_lang = traj[gt_lang][-1]
+    goal = traj_obs["goal"][-1]
+    print(gt_lang)
     samples_out = []
 
     for yaw_chunk, pos_chunk, image_chunk in zip(yaw_chunks, pos_chunks, image_chunks):
@@ -53,6 +63,8 @@ def compute_lang_instruc(traj, chunk_size, yaw_threshold, pos_threshold):
         sample["obs"] = image_chunk
         sample["lang"] = lang
         sample["varied_lang"] = varied_lang
+        sample["gt_lang"] = gt_lang 
+        sample["goal"] = goal
 
         samples_out.append(sample)
 
@@ -60,7 +72,7 @@ def compute_lang_instruc(traj, chunk_size, yaw_threshold, pos_threshold):
     print(data.size())
     return data
 
-def relabel_primitives(dataset, chunk_size, yaw_threshold, pos_threshold):
+def relabel_primitives(dataset: DLataset, chunk_size, yaw_threshold, pos_threshold)-> DLataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         :
     ''' Preprocess the tf dataset into chunks with language instructions'''
     # TODO: believe dataset will now be list of trajectories 
     # Send traj to be mapped to chunks and instructions
@@ -68,7 +80,6 @@ def relabel_primitives(dataset, chunk_size, yaw_threshold, pos_threshold):
         partial(compute_lang_instruc, chunk_size=chunk_size, yaw_threshold=yaw_threshold, pos_threshold=pos_threshold),
         num_parallel_calls=None
     )
-    print(dataset.size())
 
     return dataset
 

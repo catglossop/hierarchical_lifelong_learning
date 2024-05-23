@@ -1,3 +1,4 @@
+from functools import partial
 import time
 from typing import Mapping
 from agentlace.data.tf_agents_episode_buffer import EpisodicTFDataStore
@@ -12,11 +13,13 @@ import sys
 import os
 import ipdb
 from datetime import datetime
+from agentlace.data.rlds_writer import RLDSWriter
 # from ml_collections import config_dict, config_flags, ConfigDict
 
 # from dlimp.dataset import DLataset
 from hierarchical_lifelong_learning.train.task_utils import (
     task_data_format,
+    rlds_data_format,
     make_trainer_config,
 )
 
@@ -34,7 +37,7 @@ def main(_):
     tf.get_logger().setLevel("WARNING")
 
     # WITH SAVING 
-    data_spec = task_data_format()
+    data_spec = rlds_data_format()
     gcp_bucket = "gs://catg_central2"
     now = datetime.now() 
     date_time = now.strftime("%m-%d-%Y_%H-%M-%S")
@@ -42,13 +45,20 @@ def main(_):
 
     version= "0.0.0"
     datastore_path = f"{gcp_bucket}/{data_dir}/{version}"
-    writer = tf.io.TFRecordWriter(datastore_path)
-
+    #writer = tf.io.TFRecordWriter(datastore_path)
+    writer = RLDSWriter(
+            dataset_name="test",
+            data_spec = data_spec,
+            data_directory = datastore_path,
+            version=version, 
+            max_episodes_per_file=100,
+    )
     atexit.register(writer.close) # so it SAVES on exit
 
     online_dataset_datastore = EpisodicTFDataStore(
         capacity=10000,
-        data_spec=task_data_format(),
+        data_spec=rlds_data_format(),
+        rlds_logger = writer
     )
     print("Datastore set up")
 
@@ -69,6 +79,7 @@ def main(_):
     while online_dataset_datastore.size < samples_to_wait_for:
         time.sleep(1.0)
         pbar.update(online_dataset_datastore.size - pbar.n)
+        print(online_dataset_datastore._num_data_seen)
 
     processed_dataset = relabel_primitives(
         online_dataset_datastore.as_dataset(),
@@ -77,8 +88,8 @@ def main(_):
         pos_threshold=0.1,
     )
 
-    for data in processed_dataset:
-        writer.write(data.SerializeToString())
+    #for data in processed_dataset:
+    #    writer.write(data.SerializeToString())
 
     # ipdb.set_trace() # BREAKPOINT!!! this is how they work
 

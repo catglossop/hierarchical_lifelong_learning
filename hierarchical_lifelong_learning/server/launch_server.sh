@@ -16,7 +16,8 @@ tmux send-keys "cd /nfs/nfs2/users/cglossop/hierarchical_lifelong_learning/hiera
 
 # Launch data collection
 tmux select-pane -t 1
-tmux send-keys "conda activate hi_learn" Enter                         tmux send-keys "cd /nfs/nfs2/users/cglossop/ && . config_openai.sh" Enter
+tmux send-keys "conda activate hi_learn" Enter                         
+tmux send-keys "cd /nfs/nfs2/users/cglossop/ && . config_openai.sh" Enter
 tmux send-keys "cd /nfs/nfs2/users/cglossop/hierarchical_lifelong_learning/hierarchical_lifelong_learning/train && python annotate_data_server.py" Enter
 
 # Attach to the tmux session
