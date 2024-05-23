@@ -42,12 +42,12 @@ def main(_):
     now = datetime.now() 
     date_time = now.strftime("%m-%d-%Y_%H-%M-%S")
     data_dir = f"lifelong_data_{date_time}"
-
+    name = "lifelong_data"
     version= "0.0.0"
     datastore_path = f"{gcp_bucket}/{data_dir}/{version}"
     #writer = tf.io.TFRecordWriter(datastore_path)
     writer = RLDSWriter(
-            dataset_name="test",
+            dataset_name=name,
             data_spec = data_spec,
             data_directory = datastore_path,
             version=version, 
@@ -81,15 +81,23 @@ def main(_):
         pbar.update(online_dataset_datastore.size - pbar.n)
         print(online_dataset_datastore._num_data_seen)
 
-    processed_dataset = relabel_primitives(
-        online_dataset_datastore.as_dataset(),
-        chunk_size=10,
-        yaw_threshold=np.pi/2,
-        pos_threshold=0.1,
-    )
+    # load dataset 
+    for file in tf.io.gfile.listdir(datastore_path):
+        if not file.startswith("test-train"):
+            continue
+        dataset = tfds.load(name,
+            data_dir = datastore_path,
+        )
 
-    #for data in processed_dataset:
-    #    writer.write(data.SerializeToString())
+        processed_dataset = relabel_primitives(
+            online_dataset_datastore.as_dataset(),
+            chunk_size=10,
+            yaw_threshold=np.pi/2,
+            pos_threshold=0.1,
+        )
+        new_version = "0.0.1"
+        modified_path = f"{gcp_bucket}/{data_dir}/{new_version}"
+        processed_dataset.save(modified_path)
 
     # ipdb.set_trace() # BREAKPOINT!!! this is how they work
 
