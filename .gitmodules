@@ -4,3 +4,12 @@
 [submodule "dlimp"]
 	path = dlimp
 	url = https://github.com/catglossop/dlimp.git
+[submodule "prismatic-vlm"]
+	path = prismatic-vlm
+	url = git@github.com:TRI-ML/prismatic-vlms.git
+[submodule "prismatic-vlms"]
+	path = prismatic-vlms
+	url = git@github.com:TRI-ML/prismatic-vlms.git
+[submodule "visualnav-transformer"]
+	path = visualnav-transformer
+	url = git@github.com:robodhruv/visualnav-transformer.git
