@@ -1,9 +1,0 @@
-Metadata-Version: 2.1
-Name: hierarchical_lifelong_learning
-Version: 0.0.1
-Requires-Python: >=3.8
-Requires-Dist: tensorflow>=2.13.0
-Requires-Dist: tqdm
-Requires-Dist: tqdm-multiprocess==0.0.11
-Requires-Dist: pre-commit==3.3.3
-Requires-Dist: tensorflow_datasets>=4.9.2

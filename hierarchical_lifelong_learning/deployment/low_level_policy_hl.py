@@ -55,9 +55,9 @@ from hierarchical_lifelong_learning.train.task_utils import (
 
 # CONSTANTS
 TOPOMAP_IMAGES_DIR = "topomaps/images"
-ROBOT_CONFIG_PATH ="../../../deployment/config/robot.yaml"
-MODEL_CONFIG_PATH = "../../../deployment/config/models.yaml"
-DATA_CONFIG = "../../../deployment/config/data_config.yaml"
+ROBOT_CONFIG_PATH ="../../../../deployment/config/robot.yaml"
+MODEL_CONFIG_PATH = "../../../../deployment/config/models.yaml"
+DATA_CONFIG = "../../../../deployment/config/data_config.yaml"
 PRIMITIVES = ["Turn left", "Turn right", "Go straight", "Stop"]
 DEBUG = False
 class LowLevelPolicy(Node): 
