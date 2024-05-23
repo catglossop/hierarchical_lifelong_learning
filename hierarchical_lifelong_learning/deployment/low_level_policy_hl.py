@@ -59,7 +59,7 @@ ROBOT_CONFIG_PATH ="../../../deployment/config/robot.yaml"
 MODEL_CONFIG_PATH = "../../../deployment/config/models.yaml"
 DATA_CONFIG = "../../../deployment/config/data_config.yaml"
 PRIMITIVES = ["Turn left", "Turn right", "Go straight", "Stop"]
-DEBUG = True 
+DEBUG = False
 class LowLevelPolicy(Node): 
 
     def __init__(self, 
@@ -386,14 +386,12 @@ class LowLevelPolicy(Node):
         self.sampled_actions_pub.publish(self.sampled_actions_msg)
         self.naction = self.naction[0] 
         self.chosen_waypoint = self.naction[self.args.waypoint] 
-
+        print(self.chosen_waypoint.shape)
     def timer_callback(self):
 
         self.chosen_waypoint = np.zeros(4, dtype=np.float32)
         if DEBUG:
             self.is_docked = False
-        print("Len of context: ", len(self.context_queue))
-        print("is_docked: ", self.is_docked)
         if len(self.context_queue) > self.model_params["context_size"] and not self.is_docked:
             print("Wait for reset: ", self.wait_for_reset)
             print("Subgoal image: ", self.subgoal_image is not None)
@@ -401,7 +399,7 @@ class LowLevelPolicy(Node):
             if not self.wait_for_reset and self.subgoal_image is not None: 
                 # Process observations
                 self.process_images()
-
+                
                 # Check if goal reached
                 if self.dists is not None and self.dists[0] < self.reached_dist: 
                     self.reached_goal = True
@@ -411,26 +409,25 @@ class LowLevelPolicy(Node):
 
                 # Use policy to get actions
                 self.infer_actions()
+
+                # Step the traj duration
+                self.traj_duration += 1
                 if DEBUG: 
                     print("Traj dur: ", self.traj_duration)
                     print("Current state: ", self.state)
                     print("Goal reached: ", self.reached_goal)
                     print("Wait for reset: ", self.wait_for_reset)
                 if self.traj_duration > self.subgoal_timeout:
-                    self.traj_duration = 0
                     self.is_terminal = True 
                     self.status = "timeout"
                 elif self.state == "reset":
-                    self.traj_duration = 0
                     self.is_terminal = True 
                     self.status = "crash"
                     self.wait_for_reset = True 
                 elif self.reached_goal:
-                    self.traj_duration = 0
                     self.is_terminal = True 
                     self.status = "reached_goal"
                 elif self.state in ["idle", "nav_to_dock", "dock", "undock", "teleop"]:
-                    self.traj_duration = 0
                     self.is_terminal = True
                     self.status = "manual"
                     self.wait_for_reset = True
@@ -442,21 +439,25 @@ class LowLevelPolicy(Node):
                     "obs" : self.obs_bytes, 
                     "position" : tf.convert_to_tensor(self.current_pos, dtype=np.float64),
                     "yaw": tf.convert_to_tensor(self.current_yaw, dtype=np.float64), 
+                    "status": tf.constant(self.status, dtype=tf.string),
+                    "gt_lang": tf.constant(self.prompt, dtype=tf.string),
+                    "goal": self.goal_bytes,
+
                 }
                 formatted_obs = {
                     "observation": self.curr_obs,
-                    "goal": self.goal_bytes,
+                    "action": tf.convert_to_tensor(self.chosen_waypoint, dtype=tf.float64),
                     "is_first": tf.constant(self.starting_traj, dtype=tf.bool),
                     "is_last": tf.constant(self.is_terminal, dtype=tf.bool),
                     "is_terminal": tf.constant(self.is_terminal, dtype=tf.bool),
-                    "status": tf.constant(self.status, dtype=tf.string),
-                    "gt_lang": tf.constant(self.prompt, dtype=tf.string),
                 }
+                print(f"Observation:\n\tPosition: {formatted_obs['observation']['position'].numpy()}\n\tYaw: {formatted_obs['observation']['yaw'].numpy()}\nis first: {formatted_obs['is_first'].numpy()}\nis last: {formatted_obs['is_last'].numpy()}\nis terminal:{formatted_obs['is_terminal'].numpy()}\nstatus: {formatted_obs['observation']['status'].numpy()}\ngt lang: {formatted_obs['observation']['gt_lang'].numpy()}")
+                print("Traj duration: ", self.traj_duration)
                 if self.starting_traj: 
                     self.starting_traj = False 
                 res = self.local_data_store.insert(formatted_obs)
+                # print(self.local_data_store.get_latest_data(0))
                 print("Size of datastore: ", len(self.local_data_store))
-                self.traj_duration += 1
 
                 # Normalize and publish waypoint
                 if self.model_params["normalize"]:
@@ -473,6 +474,7 @@ class LowLevelPolicy(Node):
                 self.subgoal_msg = self.bridge.cv2_to_imgmsg(np.array(self.subgoal_image), "passthrough")
                 self.subgoal_pub.publish(self.subgoal_msg)
                 self.goal_bytes = self.transform_image_to_string(self.subgoal_image, (160,120))
+                self.traj_duration = 0
                 self.starting_traj = True
                 self.reached_goal = False
                 self.wait_for_reset = False
