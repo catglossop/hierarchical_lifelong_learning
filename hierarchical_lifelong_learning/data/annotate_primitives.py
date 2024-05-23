@@ -101,15 +101,15 @@ varied_stop = [
     "bring to a halt",
     "put an end to"
 ]
-
-folder_names = []
-print("LOADING DATA ...")
-for name in os.listdir(DATASET_PATH):
-        if os.path.isdir(os.path.join(DATASET_PATH,name)):
-            try:
-                folder_names.append(os.path.join(DATASET_PATH, name))
-            except Exception as e:
-                print(f'Encountered error processing folder {name} with error {e}')
+def load_data():    
+    folder_names = []
+    print("LOADING DATA ...")
+    for name in os.listdir(DATASET_PATH):
+            if os.path.isdir(os.path.join(DATASET_PATH,name)):
+                try:
+                    folder_names.append(os.path.join(DATASET_PATH, name))
+                except Exception as e:
+                    print(f'Encountered error processing folder {name} with error {e}')
 
 def get_yaw_delta(yaw_reshape):
     yaw_delta = yaw_reshape[:,-1] - yaw_reshape[:,0]
@@ -209,66 +209,6 @@ print(f"DIST_MEAN: {FORWARD_THRESHOLD}")
             
 
 base_instructions = ["Turn left", "Turn right", "Go forward", "Stop"]
-
-
-def compute_lang_instruc(traj, chunk_size, yaw_threshold, pos_threshold):
-
-    yaw = traj["yaw"]
-    pos = traj["position"]
-
-    num_chunks = len(yaw)//chunk_size 
-    yaw_chunks = np.split(yaw, num_chunks)
-    pos_chunks = np.split(pos, num_chunks)
-    image_chunks = np.split(traj["obs"], num_chunks)
-
-    samples_out = []
-    
-    for yaw_chunk, pos_chunk, image_chunk in zip(yaw_chunks, pos_chunks, image_chunks): 
-
-        yaw_delta = float(get_yaw_delta(yaw_chunk).squeeze())
-        pos_delta = np.sqrt(np.sum(np.square(pos_chunk[-1,:] - pos_chunk[0,:]), axis=-1))
-
-        if yaw_delta > yaw_threshold:
-            lang = base_instructions[0]
-            varied_lang = random.choice(varied_left)
-        elif yaw_delta < -yaw_threshold:
-            lang = base_instructions[1]
-            varied_lang = random.choice(varied_right)
-        else: 
-            if pos_delta > pos_threshold:
-                lang = base_instructions[2]
-                varied_lang = random.choice(varied_forward)
-            else:
-                lang = base_instructions[3]
-                varied_lang = random.choice(varied_stop)
-        sample = {}
-        sample["obs"] = image_chunk
-        sample["lang"] = lang
-        sample["varied_lang"] = varied_lang
-
-        samples_out.append(sample)
-    
-    data = tf.concat(samples_out, axis=0)
-    print(data.size())
-    return data
-
-def relabel_primitives(dataset, chunk_size, yaw_threshold, pos_threshold):
-    ''' Preprocess the tf dataset into chunks with language instructions'''
-    # TODO: believe dataset will now be list of trajectories 
-    # Send traj to be mapped to chunks and instructions
-    dataset = dataset.map(
-        partial(compute_lang_instruc, chunk_size=chunk_size, yaw_threshold=yaw_threshold, pos_threshold=pos_threshold), 
-        num_parallel_calls=None
-    )
-    print(dataset.size())
-
-    return dataset
-
-def relabel_vlm(dataset): 
-    ''' Relabel the dataset with the VLM instructions'''
-    # Should have available list of skills ? 
-    # Otherwise just use VLM to get an idea of what happened
-    pass
 
 def get_language_instructions(yaw, pos):
     language_instructions = []

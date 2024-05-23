@@ -20,21 +20,15 @@ from hierarchical_lifelong_learning.train.task_utils import (
     make_trainer_config,
 )
 
-from hierarchical_lifelong_learning.data.annotate_primitives import (
-    dataset_preprocess,
+from hierarchical_lifelong_learning.data.data_utils import (
+    relabel_primitives,
+    relabel_vlm,
     compute_lang_instruc,
     get_yaw_delta
 )
 
 import atexit
-import flags
-
-
-
-# import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "" # NO CUDA MEMORY SPENT
-
-FLAGS = flags.FLAGS
+from absl import app, flags, logging as absl_logging
 
 def main(_):
     tf.get_logger().setLevel("WARNING")
@@ -44,12 +38,11 @@ def main(_):
     gcp_bucket = "gs://catg_central2"
     now = datetime.now() 
     date_time = now.strftime("%m-%d-%Y_%H-%M-%S")
-    data_dir = "lifelong_data_"
+    data_dir = f"lifelong_data_{date_time}"
 
     version= "0.0.0"
     datastore_path = f"{gcp_bucket}/{data_dir}/{version}"
-    os.makedirs(datastore_path)
-    writer = tf.python_io.TFRecordWriter(datastore_path)
+    writer = tf.io.TFRecordWriter(datastore_path)
 
     atexit.register(writer.close) # so it SAVES on exit
 
@@ -61,21 +54,23 @@ def main(_):
 
     def request_callback(_type, _payload):
         raise NotImplementedError(f"Unknown request type {_type}")
-
+    train_config = make_trainer_config()
+    print(train_config.port_number)
+    print(train_config)
     train_server = TrainerServer(
         config=make_trainer_config(),
         request_callback=request_callback,
     )
-    train_server.register_data_store("online_data", online_dataset_datastore)
+    train_server.register_data_store("lifelong_data", online_dataset_datastore)
     train_server.start(threaded=True)
 
-    samples_to_wait_for = 1000  # usually 1000
+    samples_to_wait_for = 40  # usually 1000
     pbar = tqdm.tqdm(total=samples_to_wait_for, desc="Waiting for data")
     while online_dataset_datastore.size < samples_to_wait_for:
         time.sleep(1.0)
         pbar.update(online_dataset_datastore.size - pbar.n)
 
-    processed_dataset = dataset_preprocess(
+    processed_dataset = relabel_primitives(
         online_dataset_datastore.as_dataset(),
         chunk_size=10,
         yaw_threshold=np.pi/2,
@@ -91,11 +86,4 @@ def main(_):
 if __name__ == "__main__":
     import os
 
-
-    config_flags.DEFINE_config_file(
-        "data_config",
-        os.path.join(os.path.dirname(__file__), "data_config.py:oppenheimer"),
-        "Configuration for the agent",
-    )
-    flags.DEFINE_string("dataset_name", "gray_local", "Which dataset to train on")
     app.run(main)

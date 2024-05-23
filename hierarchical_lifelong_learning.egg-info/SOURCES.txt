@@ -1,0 +1,7 @@
+README.md
+setup.py
+hierarchical_lifelong_learning.egg-info/PKG-INFO
+hierarchical_lifelong_learning.egg-info/SOURCES.txt
+hierarchical_lifelong_learning.egg-info/dependency_links.txt
+hierarchical_lifelong_learning.egg-info/requires.txt
+hierarchical_lifelong_learning.egg-info/top_level.txt
