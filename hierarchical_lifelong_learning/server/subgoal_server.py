@@ -53,13 +53,15 @@ from openai import OpenAI
 ##############################################################################
 
 # Diffusion model params 
-CHECK_POINT_PATH = "gs://catg_central2/logs/susie-nav_2024.04.26_23.01.31/200000/state"
-WANDB_NAME = "catglossop/susie/jxttu4lu"
+# CHECK_POINT_PATH = "gs://catg_central2/logs/susie-nav_2024.04.26_23.01.31/200000/state"
+# WANDB_NAME = "catglossop/susie/jxttu4lu"
+CHECK_POINT_PATH = "gs://catg_central2/logs/susie-nav_2024.05.02_09.55.29/100000/state"
+WANDB_NAME = "catglossop/susie/jfwhcabr"
 PRETRAINED_PATH = "runwayml/stable-diffusion-v1-5:flax"
 prompt_w = 5.0
 context_w = 5.0
 diffusion_num_steps = 50
-num_samples = 10
+num_samples = 3
 
 # Import OpenAI params 
 gpt_model = "gpt-4o"
@@ -76,12 +78,13 @@ diffusion_sample = create_sample_fn(
         PRETRAINED_PATH,
     )
 
-OPENAI_KEY = os.environ.get("OPENAI_KEY")
+OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
 ORGANIZATION_ID = os.environ.get("ORGANIZATION_ID")
 client = OpenAI(api_key=OPENAI_KEY,
                     organization = ORGANIZATION_ID)
 gpt_model = gpt_model
 message_buffer = []
+DEBUG = False 
 
 def image_to_base64(image):
     buffer = BytesIO()
@@ -157,7 +160,8 @@ ai_response = client.chat.completions.create(
 message_buffer.append(ai_response.choices[0].message)
 @app.route('/gen_subgoal', methods=["POST"])
 def generate_subgoal():
-    # Receive data 
+    # Receive data
+    global message_buffer
     data = request.get_json()
     img_data = base64.b64decode(data['curr'])
     curr_obs = Image.open(BytesIO(img_data))
@@ -174,16 +178,17 @@ def generate_subgoal():
     gen_subgoal = diffusion_sample(curr_obs_np, ll_prompt)
     time_key = datetime.now().strftime("%Y-%d-%m_%H-%M-%S")
     folder = f"gen_subgoals_{ll_prompt_mod}_{time_key}"
-    os.makedirs(folder, exist_ok=True)
-    text_file = open(os.path.join(folder, "gpt_comments.txt"), "a+")
+    if DEBUG:
+        os.makedirs(folder, exist_ok=True)
+        text_file = open(os.path.join(folder, "gpt_comments.txt"), "a+")
 
-    imageio.imwrite(os.path.join(folder, "gen_subgoal_{}.png".format(idx)), gen_subgoal)
-    max_samples = 10
+    if DEBUG:
+        imageio.imwrite(os.path.join(folder, "gen_subgoal_{}.png".format(idx)), gen_subgoal)
     samples_descrip = []
     samples = []
     curr_obs_64 = image_to_base64(curr_obs)
     gen_subgoal_64 = image_to_base64(Image.fromarray(gen_subgoal))
-    while not gpt_approved and idx < max_samples:
+    while not gpt_approved and idx < num_samples:
         print("Diffusion sample: ", idx)
         current_context = f"""The ID of this message is {idx}. A robot is trying to perform the high level task {hl_prompt}. It is currently executing the low level task {ll_prompt}. 
                             The first image is the robot's current observation and the second image is the the goal image for the low level prompt. 
@@ -216,23 +221,27 @@ def generate_subgoal():
         # process the current response for positive or negative
         curr_response = ai_response.choices[0].message.content
         print("Response: ", curr_response)
-        text_file.write(curr_response)
+        if DEBUG:
+            text_file.write(curr_response)
         samples_descrip.append(f"{idx}: {curr_response}")
         samples.append(gen_subgoal_64)
         if ai_response.choices[0].message.content.split(":")[0] == "YES":
             gpt_approved = True
-            imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
+            if DEBUG:
+                imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
             response = jsonify(goal=gen_subgoal_64)
+            message_buffer = [initial_message]
             return response
         idx += 1
         gen_subgoal = diffusion_sample(curr_obs_np, ll_prompt)
-        imageio.imwrite(os.path.join(folder, f"gen_subgoal_{idx}.png"), gen_subgoal)
+        if DEBUG:
+            imageio.imwrite(os.path.join(folder, f"gen_subgoal_{idx}.png"), gen_subgoal)
 
     # Reset the context buffer
     samples_descrip_processed = (" ").join(samples_descrip)
     print(samples_descrip_processed)
     fallback_context = f"""A robot is trying to perform the high level task {hl_prompt}. It is currently executing the low level task {ll_prompt}. 
-                        {max_samples} subgoals were generated for this task and all of them were deemed not good enough. 
+                        {num_samples} subgoals were generated for this task and all of them were deemed not good enough. 
                         Choose the best option from the previous examples and return the ID of the best option. The response must only contain the ID of the best option."""
     fallback_message = {
         "role": "user",
@@ -246,15 +255,18 @@ def generate_subgoal():
         messages=message_buffer,
         max_tokens=300,
     )
-
-    text_file.write(ai_response.choices[0].message.content)
+    
+    if DEBUG:
+        text_file.write(ai_response.choices[0].message.content)
     print("Selected subgoal is: ", int(ai_response.choices[0].message.content))
     gen_subgoal_selected = samples[int(ai_response.choices[0].message.content)]
-    imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
+    if DEBUG:
+        imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
     response = jsonify(goal=gen_subgoal_selected)
-    text_file.close()
+    if DEBUG:
+        text_file.close()
+    message_buffer = [initial_message]
     return response
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)

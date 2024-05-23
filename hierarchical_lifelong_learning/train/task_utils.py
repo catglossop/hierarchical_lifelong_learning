@@ -14,9 +14,7 @@ def observation_format():
     return {
         "obs": tf.TensorSpec((), tf.string, name="image"),
         "position": tf.TensorSpec((2,), tf.float64, name="position"),
-        "yaw": tf.TensorSpec((1,), tf.float64, name="orientation"),
-        "linear_velocity": tf.TensorSpec((3,), tf.float64, name="linear_velocity"),
-        "angular_velocity": tf.TensorSpec((3,), tf.float64, name="angular_velocity"),
+        "yaw": tf.TensorSpec((), tf.float64, name="orientation"),
     }
 
 def robot_data_format():
@@ -39,17 +37,10 @@ def rlds_data_format():
 def task_data_format():
     return {
         # **robot_data_format(),
-        "observation": {
-            **observation_format(),
-            "goal": {
-                "image": tf.TensorSpec((), tf.string, name="image"),
-                "position": tf.TensorSpec((3,), tf.float64, name="position"),
-                "orientation": tf.TensorSpec((4,), tf.float64, name="orientation"),
-                "reached": tf.TensorSpec((), tf.bool, name="reached"),
-            },
-        },
-        "action": tf.TensorSpec((2,), tf.float64, name="action"),
+        "observation": observation_format(),
+        "goal" : tf.TensorSpec((), tf.string, name="goal"),
         "is_first": tf.TensorSpec((), tf.bool, name="is_first"),
         "is_last": tf.TensorSpec((), tf.bool, name="is_last"),
         "is_terminal": tf.TensorSpec((), tf.bool, name="is_terminal"),
+        "status": tf.TensorSpec((), tf.string, name="status"),
     }
