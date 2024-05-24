@@ -81,24 +81,32 @@ def main(_):
         pbar.update(online_dataset_datastore.size - pbar.n)
         print(online_dataset_datastore._num_data_seen)
 
-    # load dataset 
-    for file in tf.io.gfile.listdir(datastore_path):
-        if not file.startswith(name):
-            continue
-        print("Dataset found! Starting processing...")
-        dataset = tfds.load(name,
-            data_dir = datastore_path,
-        )
 
-        processed_dataset = relabel_primitives(
-            online_dataset_datastore.as_dataset(),
-            chunk_size=10,
-            yaw_threshold=np.pi/2,
-            pos_threshold=0.1,
-        )
-        new_version = "0.0.1"
-        modified_path = f"{gcp_bucket}/{data_dir}/{new_version}"
-        processed_dataset.save(modified_path)
+    raw_dataset = online_dataset_datastore.as_dataset()
+    ipdb.set_trace()
+
+    processed_dataset = relabel_primitives(raw_dataset, chunk_size=10, yaw_threshold=np.pi/2, pos_threshold=0.1)
+    new_version = "0.0.1"
+    modified_path = f"{gcp_bucket}/{data_dir}/{new_version}"
+    processed_dataset.save(modified_path)
+    # load dataset 
+    # for file in tf.io.gfile.listdir(datastore_path):
+    #     if not file.startswith(name):
+    #         continue
+    #     print("Dataset found! Starting processing...")
+    #     dataset = tfds.load(name,
+    #         data_dir = datastore_path,
+    #     )
+
+        # processed_dataset = relabel_primitives(
+        #     online_dataset_datastore.as_dataset(),
+        #     chunk_size=10,
+        #     yaw_threshold=np.pi/2,
+        #     pos_threshold=0.1,
+        # )
+        # new_version = "0.0.1"
+        # modified_path = f"{gcp_bucket}/{data_dir}/{new_version}"
+        # processed_dataset.save(modified_path)
 
     # ipdb.set_trace() # BREAKPOINT!!! this is how they work
 
