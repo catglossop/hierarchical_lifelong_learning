@@ -72,7 +72,7 @@ def compute_lang_instruc(traj, chunk_size, yaw_threshold, pos_threshold):
     print(data.size())
     return data
 
-def relabel_primitives(dataset: DLataset, chunk_size, yaw_threshold, pos_threshold)-> DLataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         :
+def relabel_primitives(dataset: DLataset, *, chunk_size, yaw_threshold, pos_threshold)-> DLataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         :
     ''' Preprocess the tf dataset into chunks with language instructions'''
     # TODO: believe dataset will now be list of trajectories 
     # Send traj to be mapped to chunks and instructions
