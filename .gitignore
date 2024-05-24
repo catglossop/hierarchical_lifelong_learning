@@ -1,7 +1,9 @@
-deployment/model_weights/
-deployment/__pycache__/
-deployment/models/nomad/__pycache__/
-deployment/topomaps/*
+hierarchical_lifelong_learning/deployment/model_weights/
+hierarchical_lifelong_learning/deployment/__pycache__/
+hierarchical_lifelong_learning/train/__pycache__/
+hierarchical_lifelong_learning/deployment/models/nomad/__pycache__/
+hierarchical_lifelong_learning/deployment/topomaps/*
 *.jpg
 **/*.jpg
 */__pycache__/
+hierarchical_lifelong_learning.egg-info

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torchvision
 from typing import List, Dict, Optional, Tuple, Callable
 from efficientnet_pytorch import EfficientNet
-from hierarchical_lifelong_learning.deployment.models.nomad.self_attention import PositionalEncoding
+from hierarchical_lifelong_learning.hierarchical_lifelong_learning.deployment.models.nomad.self_attention import PositionalEncoding
 
 class NoMaD_ViNT(nn.Module):
     def __init__(

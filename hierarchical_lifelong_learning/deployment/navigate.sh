@@ -29,7 +29,7 @@ tmux send-keys "python low_level_policy_hl.py $@" Enter
 # Run the pd_controller.py script in the fourth pane
 tmux select-pane -t 1
 tmux send-keys "conda activate lifelong" Enter
-tmux send-keys "python ../../../deployment/deployment/pd_controller.py" Enter
+tmux send-keys "python ../../../../deployment/deployment/pd_controller.py" Enter
 
 # Attach to the tmux session
 tmux -2 attach-session -t $session_name
