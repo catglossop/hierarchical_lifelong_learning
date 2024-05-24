@@ -83,8 +83,9 @@ def main(_):
 
     # load dataset 
     for file in tf.io.gfile.listdir(datastore_path):
-        if not file.startswith("test-train"):
+        if not file.startswith(name):
             continue
+        print("Dataset found! Starting processing...")
         dataset = tfds.load(name,
             data_dir = datastore_path,
         )
