@@ -453,9 +453,9 @@ class LowLevelPolicy(Node):
                 }
                 print(f"Observation:\n\tPosition: {formatted_obs['observation']['position'].numpy()}\n\tYaw: {formatted_obs['observation']['yaw'].numpy()}\nis first: {formatted_obs['is_first'].numpy()}\nis last: {formatted_obs['is_last'].numpy()}\nis terminal:{formatted_obs['is_terminal'].numpy()}\nstatus: {formatted_obs['observation']['status'].numpy()}\ngt lang: {formatted_obs['observation']['gt_lang'].numpy()}")
                 print("Traj duration: ", self.traj_duration)
+                res = self.local_data_store.insert(formatted_obs)
                 if self.starting_traj: 
                     self.starting_traj = False 
-                res = self.local_data_store.insert(formatted_obs)
                 # print(self.local_data_store.get_latest_data(0))
                 print("Size of datastore: ", len(self.local_data_store))
 

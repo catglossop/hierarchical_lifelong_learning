@@ -64,9 +64,9 @@ def main(_):
 
     def request_callback(_type, _payload):
         raise NotImplementedError(f"Unknown request type {_type}")
+
     train_config = make_trainer_config()
-    print(train_config.port_number)
-    print(train_config)
+
     train_server = TrainerServer(
         config=make_trainer_config(),
         request_callback=request_callback,
@@ -76,36 +76,26 @@ def main(_):
 
     samples_to_wait_for = 40  # usually 1000
     pbar = tqdm.tqdm(total=samples_to_wait_for, desc="Waiting for data")
-    while online_dataset_datastore.size < samples_to_wait_for:
-        time.sleep(1.0)
-        pbar.update(online_dataset_datastore.size - pbar.n)
-        print(online_dataset_datastore._num_data_seen)
+    while True: 
+        while online_dataset_datastore.size < samples_to_wait_for:
+            time.sleep(1.0)
+            pbar.update(online_dataset_datastore.size - pbar.n)
+            print(online_dataset_datastore._num_data_seen)
 
-    raw_dataset = online_dataset_datastore.as_dataset()
-    ipdb.set_trace()
+        raw_dataset = online_dataset_datastore.as_dataset().iterator()
 
-    processed_dataset = relabel_primitives(raw_dataset, chunk_size=10, yaw_threshold=np.pi/2, pos_threshold=0.1)
-    new_version = "0.0.1"
-    modified_path = f"{gcp_bucket}/{data_dir}/{new_version}"
-    processed_dataset.save(modified_path)
-    # load dataset 
-    # for file in tf.io.gfile.listdir(datastore_path):
-    #     if not file.startswith(name):
-    #         continue
-    #     print("Dataset found! Starting processing...")
-    #     dataset = tfds.load(name,
-    #         data_dir = datastore_path,
-    #     )
+        for epsiode in raw_dataset: 
+            ipdb.set_trace()
 
-        # processed_dataset = relabel_primitives(
-        #     online_dataset_datastore.as_dataset(),
-        #     chunk_size=10,
-        #     yaw_threshold=np.pi/2,
-        #     pos_threshold=0.1,
-        # )
-        # new_version = "0.0.1"
-        # modified_path = f"{gcp_bucket}/{data_dir}/{new_version}"
-        # processed_dataset.save(modified_path)
+            processed_episode = relabel_primitives(episode, chunk_size=10, yaw_threshold=np.pi/2, pos_threshold=0.1)
+            for sample in processed_episode: 
+                self.rlds_writer(sample)
+        ipdb.set_trace()
+        online_datastore_datastore._replay_buffer.clear()
+        online_dataset_datastore._num_data_seen = 0
+        ipdb.set_trace()
+        
+
 
     # ipdb.set_trace() # BREAKPOINT!!! this is how they work
 
