@@ -21,7 +21,7 @@ IMAGE_ASPECT_RATIO = (
 base_instructions = ["Turn left", "Turn right", "Go forward", "Stop"]
 
 
-def compute_lang_instruc(traj, chunk_size, yaw_threshold, pos_threshold):
+def relabel_primitives(traj, chunk_size, yaw_threshold, pos_threshold):
     traj_obs = traj["observation"]
     yaw = traj_obs["yaw"]
     pos = traj_obs["position"]
@@ -69,19 +69,18 @@ def compute_lang_instruc(traj, chunk_size, yaw_threshold, pos_threshold):
         samples_out.append(sample)
 
     data = tf.concat(samples_out, axis=0)
-    print(data.size())
     return data
 
-def relabel_primitives(dataset: DLataset, *, chunk_size, yaw_threshold, pos_threshold)-> DLataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         :
-    ''' Preprocess the tf dataset into chunks with language instructions'''
-    # TODO: believe dataset will now be list of trajectories 
-    # Send traj to be mapped to chunks and instructions
-    dataset = dataset.map(
-        partial(compute_lang_instruc, chunk_size=chunk_size, yaw_threshold=yaw_threshold, pos_threshold=pos_threshold),
-        num_parallel_calls=None
-    )
+# def relabel_primitives(dataset: DLataset, *, chunk_size, yaw_threshold, pos_threshold)-> DLataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         :
+#     ''' Preprocess the tf dataset into chunks with language instructions'''
+#     # TODO: believe dataset will now be list of trajectories 
+#     # Send traj to be mapped to chunks and instructions
+#     dataset = dataset.map(
+#         partial(compute_lang_instruc, chunk_size=chunk_size, yaw_threshold=yaw_threshold, pos_threshold=pos_threshold),
+#         num_parallel_calls=None
+#     )
 
-    return dataset
+#     return dataset
 
 def relabel_vlm(dataset):
     ''' Relabel the dataset with the VLM instructions'''
