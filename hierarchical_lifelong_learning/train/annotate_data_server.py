@@ -42,7 +42,7 @@ def main(_):
     gcp_bucket = "gs://catg_central2"
     now = datetime.now() 
     date_time = now.strftime("%m-%d-%Y_%H-%M-%S")
-    data_dir = f"lifelong_data_{date_time}"
+    data_dir = f"lifelong/lifelong_data_{date_time}"
     name = "lifelong_data"
     version= "0.0.0"
     datastore_path = f"{gcp_bucket}/{data_dir}/{version}"

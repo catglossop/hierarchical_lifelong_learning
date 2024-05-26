@@ -3,6 +3,7 @@ import os
 from PIL import Image
 from typing import Any, Iterable, Tuple
 from functools import partial 
+from google.cloud import storage
 #import torch
 #from torchvision import transforms
 #import torchvision.transforms.functional as TF
@@ -10,7 +11,7 @@ from functools import partial
 import tensorflow as tf
 import io
 from typing import Union
-import dlimp 
+import dlimp as dl
 from dlimp.dataset import DLataset
 
 VISUALIZATION_IMAGE_SIZE = (160, 120)
@@ -20,6 +21,91 @@ IMAGE_ASPECT_RATIO = (
 
 base_instructions = ["Turn left", "Turn right", "Go forward", "Stop"]
 
+def list_blobs(bucket_name):
+    """Lists all the blobs in the bucket."""
+
+    storage_client = storage.Client()
+
+    # Note: Client.list_blobs requires at least package version 1.17.0.
+    blobs = storage_client.list_blobs(bucket_name)
+
+    for blob in blobs:
+        print(blob.name)
+
+    return blobs
+
+def get_lifelong_paths(data_path: str, dates: tuple) -> list:
+
+    # Get the paths to the data we want
+    paths = []
+    prefix = "lifelong_data_"
+    folders = list_blobs(data_path)
+
+    for folder in folders:
+        date = ("_").join(folder.name.split("_")[2:])
+        if date > dates[0] and date < dates[1]:
+            paths.append(folder.path)
+    return paths
+
+def make_dataset(
+    name: str,
+    data_path: str,
+    dates: tuple,
+    image_size: int,
+) -> dl.DLataset:
+
+    paths = get_lifelong_paths(data_path, dates)
+    dataset = dl.Dataset.from_tfrecords(paths).iterator()
+    breakpoint()
+
+    for sample in dataset: 
+        print(sample)
+    
+    # dataset = (
+    #     dl.DLataset.from_tfrecords(paths)
+    #     .map(dl.transforms.unflatten_dict)
+    #     .map(getattr(Transforms, name))
+    #     .filter(lambda x: tf.math.reduce_all(x["lang"] != ""))
+    #     .apply(
+    #         partial(
+    #             getattr(goal_relabeling, goal_relabeling_fn), **goal_relabeling_kwargs
+    #         ),
+    #     )
+    #     .unbatch()
+    #     .shuffle(shuffle_buffer_size)
+    # )
+
+    # dataset = dataset.map(
+    #     partial(dl.transforms.decode_images, match=["curr", "goals", "subgoals"])
+    # ).map(
+    #     partial(
+    #         dl.transforms.resize_images,
+    #         match=["curr", "goals", "subgoals"],
+    #         size=(image_size, image_size),
+    #     )
+    # )
+
+    # if train:
+    #     dataset = dataset.map(
+    #         partial(
+    #             dl.transforms.augment,
+    #             traj_identical=False,
+    #             keys_identical=True,
+    #             match=["curr", "goals", "subgoals"],
+    #             augment_kwargs=augment_kwargs,
+    #         )
+    #     )
+
+    # # normalize images to [-1, 1]
+    # dataset = dataset.map(
+    #     partial(
+    #         dl.transforms.selective_tree_map,
+    #         match=["curr", "goals", "subgoals"],
+    #         map_fn=lambda v: v / 127.5 - 1.0,
+    #     )
+    # )
+
+    return dataset.repeat()
 
 def relabel_primitives(traj, chunk_size, yaw_threshold, pos_threshold):
     traj_obs = traj["observation"]
@@ -77,17 +163,6 @@ def relabel_primitives(traj, chunk_size, yaw_threshold, pos_threshold):
         samples_out.append(sample)
 
     return samples_out
-
-# def relabel_primitives(dataset: DLataset, *, chunk_size, yaw_threshold, pos_threshold)-> DLataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         :
-#     ''' Preprocess the tf dataset into chunks with language instructions'''
-#     # TODO: believe dataset will now be list of trajectories 
-#     # Send traj to be mapped to chunks and instructions
-#     dataset = dataset.map(
-#         partial(compute_lang_instruc, chunk_size=chunk_size, yaw_threshold=yaw_threshold, pos_threshold=pos_threshold),
-#         num_parallel_calls=None
-#     )
-
-#     return dataset
 
 def relabel_vlm(dataset):
     ''' Relabel the dataset with the VLM instructions'''
