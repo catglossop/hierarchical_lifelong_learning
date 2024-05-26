@@ -93,7 +93,7 @@ class LowLevelPolicy(Node):
         self.load_data_config()
 
         # INFRA FOR SAVING DATA
-        self.local_data_store = QueuedDataStore(capacity=100)
+        self.local_data_store = QueuedDataStore(capacity=1000)
         train_config = make_trainer_config()
         self.trainer = TrainerClient(
             "lifelong_data",
@@ -102,7 +102,6 @@ class LowLevelPolicy(Node):
             self.local_data_store,
             wait_for_server=True,
         )
-
         self.trainer.start_async_update(interval=5)
 
         self.irobot_qos_profile = QoSProfile(

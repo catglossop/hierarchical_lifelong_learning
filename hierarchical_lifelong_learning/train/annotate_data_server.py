@@ -41,7 +41,7 @@ def main(_):
     gcp_bucket = "gs://catg_central2"
     now = datetime.now() 
     date_time = now.strftime("%m-%d-%Y_%H-%M-%S")
-    data_dir = f"lifelong_data_{date_time}"
+    data_dir = f"lifelong/lifelong_data_{date_time}"
     name = "lifelong_data"
     version= "0.0.0"
     datastore_path = f"{gcp_bucket}/{data_dir}/{version}"
@@ -84,7 +84,7 @@ def main(_):
 
         raw_dataset = online_dataset_datastore.as_dataset().iterator()
 
-        for epsiode in raw_dataset: 
+        for episode in raw_dataset: 
             ipdb.set_trace()
 
             processed_episode = relabel_primitives(episode, chunk_size=10, yaw_threshold=np.pi/2, pos_threshold=0.1)
