@@ -14,6 +14,8 @@ import os
 import ipdb
 from datetime import datetime
 from agentlace.data.rlds_writer import RLDSWriter
+from threading import Lock 
+
 # from ml_collections import config_dict, config_flags, ConfigDict
 
 # from dlimp.dataset import DLataset
@@ -26,7 +28,6 @@ from hierarchical_lifelong_learning.train.task_utils import (
 from hierarchical_lifelong_learning.data.data_utils import (
     relabel_primitives,
     relabel_vlm,
-    compute_lang_instruc,
     get_yaw_delta
 )
 
@@ -53,6 +54,7 @@ def main(_):
             version=version, 
             max_episodes_per_file=100,
     )
+    lock = Lock()
     atexit.register(writer.close) # so it SAVES on exit
 
     online_dataset_datastore = EpisodicTFDataStore(
@@ -74,26 +76,45 @@ def main(_):
     train_server.register_data_store("lifelong_data", online_dataset_datastore)
     train_server.start(threaded=True)
 
-    samples_to_wait_for = 40  # usually 1000
-    pbar = tqdm.tqdm(total=samples_to_wait_for, desc="Waiting for data")
-    while True: 
-        while online_dataset_datastore.size < samples_to_wait_for:
-            time.sleep(1.0)
-            pbar.update(online_dataset_datastore.size - pbar.n)
-            print(online_dataset_datastore._num_data_seen)
+    #samples_to_wait_for = 100  # usually 1000
+    #pbar = tqdm.tqdm(total=samples_to_wait_for, desc="Waiting for data")
+    #while True: 
 
-        raw_dataset = online_dataset_datastore.as_dataset().iterator()
+        #while online_dataset_datastore.size < samples_to_wait_for:
+        #    time.sleep(1.0)
+        #    pbar.update(online_dataset_datastore.size - pbar.n)
+        
+        #lock.acquire()
+        #raw_dataset = online_dataset_datastore.as_dataset().iterator()
+        #idx = 0
+        #curr_traj_idx = 0
+        #len_trajs = 0 
+        #for episode in raw_dataset:
+        #    traj_idx = episode["_traj_index"][0]
+        #    print("IDX IS: ", idx)
+        #    idx += 1
+        #    print("Traj index: ", traj_idx)
+        #    if traj_idx < curr_traj_idx and traj_idx != -1:
+        #        break 
+        #    if traj_idx == -1: 
+        #        len_trajs += episode["_len"][0]
+        #        continue
+        #    if traj_idx != -1:
+        #        curr_traj_idx = traj_idx
+        #       processed_episode = relabel_primitives(episode, chunk_size=10, yaw_threshold=np.pi/2, pos_threshold=0.1)
+        #        print("One episode became: ", len(processed_episode))
+        #        for sample in processed_episode: 
+        #            writer(sample)
+        #        len_trajs += episode["_len"][0]
 
-        for epsiode in raw_dataset: 
-            ipdb.set_trace()
+        #    if len_trajs >= online_dataset_datastore._num_data_seen: 
+        #        break
 
-            processed_episode = relabel_primitives(episode, chunk_size=10, yaw_threshold=np.pi/2, pos_threshold=0.1)
-            for sample in processed_episode: 
-                self.rlds_writer(sample)
-        ipdb.set_trace()
-        online_datastore_datastore._replay_buffer.clear()
-        online_dataset_datastore._num_data_seen = 0
-        ipdb.set_trace()
+        #online_dataset_datastore._replay_buffer._replay_buffer.clear()
+        #online_dataset_datastore._num_data_seen = 0
+        #lock.release()
+        #print(online_dataset_datastore.size)
+        #ipdb.set_trace()
         
 
 

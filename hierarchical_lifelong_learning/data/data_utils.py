@@ -23,53 +23,60 @@ base_instructions = ["Turn left", "Turn right", "Go forward", "Stop"]
 
 def relabel_primitives(traj, chunk_size, yaw_threshold, pos_threshold):
     traj_obs = traj["observation"]
+
     yaw = traj_obs["yaw"]
     pos = traj_obs["position"]
-    gt_lang = traj_obs["gt_lang"]
     print(traj["_len"]) 
     if yaw.shape[0] == None: 
         print("No yaw values")
         return traj
     else:
         print("Len of traj is: ", yaw.shape)
-    num_chunks = len(yaw)//chunk_size
-    yaw_chunks = np.split(yaw, num_chunks)
-    pos_chunks = np.split(pos, num_chunks)
-    image_chunks = np.split(traj_obs["obs"], num_chunks)
-    gt_lang = traj[gt_lang][-1]
+    if yaw.shape[0] < chunk_size: 
+        yaw_chunks = [yaw]
+        pos_chunks = [pos]
+        image_chunks = [traj_obs["obs"]]
+    else:
+        num_chunks = len(yaw)//chunk_size
+        yaw_chunks = np.array_split(yaw, num_chunks)
+        pos_chunks = np.array_split(pos, num_chunks)
+        image_chunks = np.array_split(traj_obs["obs"], num_chunks)
+    gt_lang = traj_obs["gt_lang"][-1]
     goal = traj_obs["goal"][-1]
     print(gt_lang)
     samples_out = []
 
     for yaw_chunk, pos_chunk, image_chunk in zip(yaw_chunks, pos_chunks, image_chunks):
-
+        print("shapes: ", yaw_chunk.shape, pos_chunk.shape)
         yaw_delta = float(get_yaw_delta(yaw_chunk).squeeze())
         pos_delta = np.sqrt(np.sum(np.square(pos_chunk[-1,:] - pos_chunk[0,:]), axis=-1))
-
+        print("Yaw delta: ", yaw_delta)
+        print("Pos delta: ", pos_delta)
         if yaw_delta > yaw_threshold:
             lang = base_instructions[0]
-            varied_lang = random.choice(varied_left)
+            #varied_lang = random.choice(varied_left)
         elif yaw_delta < -yaw_threshold:
             lang = base_instructions[1]
-            varied_lang = random.choice(varied_right)
+            #varied_lang = random.choice(varied_right)
         else:
             if pos_delta > pos_threshold:
                 lang = base_instructions[2]
-                varied_lang = random.choice(varied_forward)
+                #varied_lang = random.choice(varied_forward)
             else:
                 lang = base_instructions[3]
-                varied_lang = random.choice(varied_stop)
+                #varied_lang = random.choice(varied_stop)
         sample = {}
-        sample["obs"] = image_chunk
+        sample["obs"] = tf.convert_to_tensor([tf.io.decode_image(chunk, expand_animations=False).numpy() for chunk in image_chunk])
+        print(sample["obs"].shape)
         sample["lang"] = lang
-        sample["varied_lang"] = varied_lang
+        #sample["varied_lang"] = varied_lang
         sample["gt_lang"] = gt_lang 
-        sample["goal"] = goal
+        sample["goal"] = tf.io.decode_image(goal, expand_animations=False)
+        print("Relabelled lang: ", lang)
 
         samples_out.append(sample)
 
-    data = tf.concat(samples_out, axis=0)
-    return data
+    return samples_out
 
 # def relabel_primitives(dataset: DLataset, *, chunk_size, yaw_threshold, pos_threshold)-> DLataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         :
 #     ''' Preprocess the tf dataset into chunks with language instructions'''
@@ -89,7 +96,7 @@ def relabel_vlm(dataset):
     pass
 
 def get_yaw_delta(yaw_reshape):
-    yaw_delta = yaw_reshape[:,-1] - yaw_reshape[:,0]
+    yaw_delta = yaw_reshape[-1] - yaw_reshape[0]
     yaw_delta_sign = np.where(yaw_delta >= np.pi, -1, 0)
     yaw_delta_sign = np.where(yaw_delta < -np.pi, 1, yaw_delta_sign)
     yaw_delta = yaw_delta + yaw_delta_sign*2*np.pi
