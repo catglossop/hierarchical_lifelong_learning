@@ -9,6 +9,7 @@ from google.cloud import storage
 #import torchvision.transforms.functional as TF
 #import torch.nn.functional as F
 import tensorflow as tf
+import tensorflow_datasets as tfds
 import io
 from typing import Union
 import dlimp as dl
@@ -21,30 +22,34 @@ IMAGE_ASPECT_RATIO = (
 
 base_instructions = ["Turn left", "Turn right", "Go forward", "Stop"]
 
-def list_blobs(bucket_name):
+def list_blobs(bucket_name, folder):
     """Lists all the blobs in the bucket."""
 
     storage_client = storage.Client()
 
     # Note: Client.list_blobs requires at least package version 1.17.0.
     blobs = storage_client.list_blobs(bucket_name)
-
+    paths = []
     for blob in blobs:
-        print(blob.name)
-
-    return blobs
+        if blob.name.split("/")[0] == folder: 
+            paths.append(blob)
+    return paths
 
 def get_lifelong_paths(data_path: str, dates: tuple) -> list:
 
     # Get the paths to the data we want
     paths = []
-    prefix = "lifelong_data_"
-    folders = list_blobs(data_path)
-
+    data_folder = "lifelong_datasets"
+    folders = list_blobs(data_path, data_folder)
     for folder in folders:
-        date = ("_").join(folder.name.split("_")[2:])
+        date = folder.name.split("/")[1]
         if date > dates[0] and date < dates[1]:
-            paths.append(folder.path)
+            dataset_path = ("/").join(folder.name.split("/")[:-3])
+            if folder.name.endswith(".tfrecord-00000"):
+                new_path = os.path.join("gs://", data_path, folder.name)
+                print(new_path)
+                paths.append(new_path)
+            
     return paths
 
 def make_dataset(
@@ -55,8 +60,16 @@ def make_dataset(
 ) -> dl.DLataset:
 
     paths = get_lifelong_paths(data_path, dates)
-    dataset = dl.Dataset.from_tfrecords(paths).iterator()
     breakpoint()
+    dataset = dl.DLataset.from_tfrecords(paths)
+    #builder = tfds.builder("lifelong_data", try_gcs=True, data_dir=path)
+    #print(path)
+    #subdataset = dl.DLataset.from_rlds(builder)
+    #if dataset is None: 
+    #    dataset = subdataset
+    #else:
+    #    dataset = dataset.concatenate(subdataset)
+    #breakpoint()
 
     for sample in dataset: 
         print(sample)

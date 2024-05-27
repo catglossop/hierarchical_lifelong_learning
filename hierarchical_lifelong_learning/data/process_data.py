@@ -18,13 +18,15 @@ from hierarchical_lifelong_learning.data.data_utils import (
 
 def process_data():
     name = "lifelong_data"
-    dates = ('05-24-2024_00-00-00', '05-26-2024_00-00-00')
-    data_path = "gs://catg_central2/lifelong"
+    dates = ('05-25-2024_05-00-00', '05-26-2024_00-00-00')
+    data_path = "catg_central2"
     image_size = 256
 
     dataset = make_dataset(name, data_path, dates, image_size)
 
     return dataset
 
+if __name__ == "__main__":
 
+    process_data()
 
