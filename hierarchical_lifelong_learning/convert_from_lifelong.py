@@ -49,6 +49,9 @@ import pandas as pd
 import h5py
 import dlimp as dl
 from dlimp.utils import resize_image, tensor_feature
+from hierarchical_lifelong_learning.data.data_utils import (
+    make_dataset,
+)
 FLAGS = flags.FLAGS
 flags.DEFINE_string("input_path", None, "Input path", required=True)
 flags.DEFINE_string("output_path", None, "Output path", required=True)
@@ -65,6 +68,7 @@ def resize_encode_image(image, size) -> tf.Tensor:
     image = resize_image(image, size)
     image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8)
     return tf.io.encode_jpeg(image, quality=95)
+
 def process_images(hf_images):  # processes images at a trajectory level
     d = dict()
     for i, k in enumerate(CAMERA_VIEWS):
@@ -75,30 +79,20 @@ def process_images(hf_images):  # processes images at a trajectory level
             images.append(resize_encode_image(img, IMAGE_SIZE)[None])
         d[f'images{i}'] = tf.concat(images, axis=0)
     return d
-def process_state(path):
-    fp = os.path.join(path, "obs_dict.pkl")
-    with open(fp, "rb") as f:
-        x = pickle.load(f)
-    return x["full_state"]
-def process_actions(path):
-    fp = os.path.join(path, "policy_out.pkl")
-    with open(fp, "rb") as f:
-        act_list = pickle.load(f)
-    if isinstance(act_list[0], dict):
-        act_list = [x["actions"] for x in act_list]
-    return act_list
-def process_lang(path):
-    fp = os.path.join(path, "lang.txt")
-    text = ""  # empty string is a placeholder for missing text
-    if os.path.exists(fp):
-        with open(fp, "r") as f:
-            text = f.readline().strip()
-    return text
+
 # create a tfrecord for a group of trajectories
 def create_tfrecord(paths, output_path, lang, tqdm_func, global_tqdm):
     writer = tf.io.TFRecordWriter(output_path)
     for path in paths:
+        data = next(iter(tf.data.TFRecordDataset(path))).numpy()
+        breakpoint()
+        example = tf.train.Example()
+        example.ParseFromString(data)
+
+        out["obs"] = process_images(example["steps/observation/obs"])
+        out["lang"] = example["steps/observation/lang"]
         try:
+
             out = dict()
             with h5py.File(path, 'r') as hf:
                 out["obs"] = process_images(hf['observations']['images'])
