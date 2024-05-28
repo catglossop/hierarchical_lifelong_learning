@@ -42,7 +42,7 @@ def main(_):
     gcp_bucket = "gs://catg_central2"
     now = datetime.now() 
     date_time = now.strftime("%m-%d-%Y_%H-%M-%S")
-    data_dir = f"lifelong/lifelong_data_{date_time}"
+    data_dir = f"lifelong_datasets/{date_time}/lifelong_data"
     name = "lifelong_data"
     version= "0.0.0"
     datastore_path = f"{gcp_bucket}/{data_dir}/{version}"
@@ -76,13 +76,13 @@ def main(_):
     train_server.register_data_store("lifelong_data", online_dataset_datastore)
     train_server.start(threaded=True)
 
-    #samples_to_wait_for = 100  # usually 1000
-    #pbar = tqdm.tqdm(total=samples_to_wait_for, desc="Waiting for data")
-    #while True: 
+    samples_to_wait_for = 10000  # usually 1000
+    pbar = tqdm.tqdm(total=samples_to_wait_for, desc="Waiting for data")
+    while True: 
 
-        #while online_dataset_datastore.size < samples_to_wait_for:
-        #    time.sleep(1.0)
-        #    pbar.update(online_dataset_datastore.size - pbar.n)
+        while online_dataset_datastore.size < samples_to_wait_for:
+            time.sleep(1.0)
+            pbar.update(online_dataset_datastore.size - pbar.n)
         
         #lock.acquire()
         #raw_dataset = online_dataset_datastore.as_dataset().iterator()
