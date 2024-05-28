@@ -71,7 +71,7 @@ class LowLevelPolicy(Node):
         self.context_size = None
         self.server_ip = args.ip
         self.SERVER_ADDRESS = f"http://{self.server_ip}:5001"
-        self.subgoal_timeout = 40 # This is partially for debugging
+        self.subgoal_timeout = 15 # This is partially for debugging
         self.wait_for_reset = False
         self.image_aspect_ratio = (4/3)
         self.starting_traj = True
@@ -279,11 +279,13 @@ class LowLevelPolicy(Node):
         if self.vlm_plan is None or len(self.vlm_plan) == 0:
             print("Requesting VLM plan")
             response = requests.post(self.SERVER_ADDRESS + str("/gen_plan"), json={'curr': image_base64}, timeout=99999999)
-            vlm_plan = response.json()['plan'].split(', ')
+            vlm_plan = response.json()['plan']
+            vlm_plan = vlm_plan.split(", ")
             hl_prompt = vlm_plan[-1]
             ll_prompts = vlm_plan[:-1]
             self.hl_prompt = hl_prompt
             self.vlm_plan = ll_prompts
+            print(self.vlm_plan)
 
         self.ll_prompt = self.vlm_plan.pop(0)
         data = {
@@ -453,7 +455,8 @@ class LowLevelPolicy(Node):
                     "position" : tf.convert_to_tensor(self.current_pos, dtype=np.float64),
                     "yaw": tf.convert_to_tensor(self.current_yaw, dtype=np.float64), 
                     "status": tf.constant(self.status, dtype=tf.string),
-                    "gt_lang": tf.constant(self.prompt, dtype=tf.string),
+                    "gt_lang_ll": tf.constant(self.ll_prompt, dtype=tf.string),
+                    "gt_lang_hl": tf.constant(self.hl_prompt, dtype=tf.string),
                     "goal": self.goal_bytes,
 
                 }

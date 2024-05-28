@@ -53,16 +53,16 @@ from openai import OpenAI
 ##############################################################################
 
 # Diffusion model params 
-# CHECK_POINT_PATH = "gs://catg_central2/logs/susie-nav_2024.04.26_23.01.31/200000/state"
-# WANDB_NAME = "catglossop/susie/jxttu4lu"
-CHECK_POINT_PATH = "gs://catg_central2/logs/susie-nav_2024.05.02_09.55.29/100000/state"
-WANDB_NAME = "catglossop/susie/jfwhcabr"
+CHECK_POINT_PATH = "gs://catg_central2/logs/susie-nav_2024.04.26_23.01.31/200000/state"
+WANDB_NAME = "catglossop/susie/jxttu4lu"
+# CHECK_POINT_PATH = "gs://catg_central2/logs/susie-nav_2024.05.02_09.55.29/100000/state"
+# WANDB_NAME = "catglossop/susie/jfwhcabr"
 PRETRAINED_PATH = "runwayml/stable-diffusion-v1-5:flax"
 
-prompt_w = 5.0
-context_w = 5.0
+prompt_w = 4.0
+context_w = 6.0
 diffusion_num_steps = 50
-num_samples = 3
+num_samples = 6
 
 # Import OpenAI params 
 gpt_model = "gpt-4o"
@@ -280,7 +280,7 @@ def generate_plan():
     # Pass image to GPT
     planning_context = f"""A robot is moving through an indoor environment. The provided image is the robot's current observation. 
                            Ultimately, we want the robot to perform the high level tasks {(", ").join(TASKS)}. Given the current observation, 
-                           generate a plan in the form of a list of actions the robot should take using only the low level tasks in this list: {(", ").join(PRIMITIVES)}. 
+                           generate a plan in the form of a list of actions the robot should take using only the low level tasks in this list: {(", ").join(PRIMITIVES)} which are executed at with a max angular velocity of 0.2 rad/s and linear velocity of 0.1 m/s over 15 seconds. 
                            If it seems that none of the high level tasks can be immediately accomplished, generate a reasonable plan as a list of low level tasks that explore the environment to find the high level tasks.
                            Format the list as follows '[insert action], [insert action], [insert action], ...'. If a high level task is being executed, append the high level task to the end of the list. Otherwise, append 'None'. Return nothing but the plan."""
     planning_message = {
