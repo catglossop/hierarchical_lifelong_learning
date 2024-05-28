@@ -299,6 +299,7 @@ def generate_plan():
             max_tokens=300,
     )
     vlm_plan = ai_response.choices[0].message.content
+    print(vlm_plan)
     response = jsonify(plan=vlm_plan)
 
 if __name__ == "__main__":

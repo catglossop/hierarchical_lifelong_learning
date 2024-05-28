@@ -14,6 +14,7 @@ import io
 from typing import Union
 import dlimp as dl
 from dlimp.dataset import DLataset
+from openai import OpenAI
 
 VISUALIZATION_IMAGE_SIZE = (160, 120)
 IMAGE_ASPECT_RATIO = (
