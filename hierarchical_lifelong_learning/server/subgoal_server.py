@@ -282,7 +282,7 @@ def generate_plan():
                            Ultimately, we want the robot to perform the high level tasks {(", ").join(TASKS)}. Given the current observation, 
                            generate a plan in the form of a list of actions the robot should take using only the low level tasks in this list: {(", ").join(PRIMITIVES)}. 
                            If it seems that none of the high level tasks can be immediately accomplished, generate a reasonable plan as a list of low level tasks that explore the environment to find the high level tasks.
-                           Format the list as follows '[insert action], [insert action], [insert action], ...'. If a high level task is being executed, append the high level task to the end of the list. Otherwise, append 'None'."""
+                           Format the list as follows '[insert action], [insert action], [insert action], ...'. If a high level task is being executed, append the high level task to the end of the list. Otherwise, append 'None'. Return nothing but the plan with no additional words."""
     planning_message = {
     "role": "user",
     "content": [
@@ -301,6 +301,7 @@ def generate_plan():
     vlm_plan = ai_response.choices[0].message.content
     print(vlm_plan)
     response = jsonify(plan=vlm_plan)
+    return response
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
