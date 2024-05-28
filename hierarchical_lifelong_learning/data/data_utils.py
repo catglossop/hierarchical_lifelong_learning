@@ -20,6 +20,8 @@ IMAGE_ASPECT_RATIO = (
     4 / 3
 )  # all images are centered cropped to a 4:3 aspect ratio in training
 
+client = OpenAI()
+
 base_instructions = ["Turn left", "Turn right", "Go forward", "Stop"]
 
 def list_blobs(bucket_name, folder):
@@ -177,11 +179,54 @@ def relabel_primitives(traj, chunk_size, yaw_threshold, pos_threshold):
 
     return samples_out
 
-def relabel_vlm(dataset):
-    ''' Relabel the dataset with the VLM instructions'''
-    # Should have available list of skills ? 
-    # Otherwise just use VLM to get an idea of what happened
-    pass
+def tensor_to_base64(tensor):
+    image = tensor.permute(1, 2, 0).numpy()
+    pil_image = Image.fromarray((image * 255).astype('uint8'))
+    buffered = io.BytesIO()
+    pil_image.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode()
+
+def relabel_vlm(dataset, chunk_size = 5):
+    def analyze_images_with_vlm(images):
+        prompt = [{"type": "text", "text": "These images represent a trajectory of robot visual observations:"}]
+        
+        for i, image in enumerate(images):
+            image_base64 = tensor_to_base64(image)
+            prompt.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{image_base64}",
+                },
+            })
+        
+        question = """ Given these series of frames, construct a descriptive label which describes the trajecotry the robot has taken and where it ends
+                        Return the label which is in the form 'go to the x' where x is a descriptive landmark in the last frame.
+                        Only return the final label."""
+        prompt.append({"type": "text", "text": question})
+
+        response = client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        label = completion.choices[0].message.content
+        return label
+
+    labels = []
+    for start_idx in range(0, len(dataset)):
+        end_idx = min(start_idx + chunk_size, len(dataset))
+        obs_images_list = []
+        
+        for i in range(start_idx, end_idx):
+            datapoint = dataset[i]
+            obs_images, goal_image, *rest = data_point
+            obs_images_list.append(obs_images)
+        
+        images = obs_images_list[i]
+        new_label = analyze_images_with_vlm(obs_images_list)
+        labels.append(new_label)    
+        
+    return relabeled_dataset
 
 def get_yaw_delta(yaw_reshape):
     yaw_delta = yaw_reshape[-1] - yaw_reshape[0]
