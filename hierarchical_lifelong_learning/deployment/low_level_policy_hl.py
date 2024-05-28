@@ -70,7 +70,7 @@ class LowLevelPolicy(Node):
         self.context_queue = []
         self.context_size = None
         self.server_ip = args.ip
-        self.SERVER_ADDRESS = f"http://{self.server_ip}:5001/gen_subgoal"
+        self.SERVER_ADDRESS = f"http://{self.server_ip}:5001"
         self.subgoal_timeout = 40 # This is partially for debugging
         self.wait_for_reset = False
         self.image_aspect_ratio = (4/3)
@@ -276,13 +276,26 @@ class LowLevelPolicy(Node):
     # TODO: add subscription to VLM planner to get the goal
     def send_image_to_server(self, image: PILImage.Image) -> dict:
         image_base64 = self.image_to_base64(image)
-        self.prompt = random.choice(PRIMITIVES)
+        if self.vlm_plan is None or len(self.vlm_plan) == 0:
+            response = requests.post(self.SERVER_ADDRESS + str("/gen_plan"), json={'curr': image_base64}, timeout=99999999)
+            vlm_plan = response.json()['vlm_plan'].split(', ')
+            hl_prompt = vlm_plan[-1]
+            ll_prompts = vlm_plan[:-1]
+            self.hl_prompt = hl_prompt
+            self.vlm_plan = ll_prompts
+
+        self.ll_prompt = self.vlm_plan.pop(0)
         data = {
             'curr': image_base64,
-            'hl_prompt': self.prompt,
-            'll_prompt': self.prompt,
+            'hl_prompt': self.hl_prompt,
+            'll_prompt': self.ll_prompt,
         }
-        response = requests.post(self.SERVER_ADDRESS, json=data, timeout=99999999)
+        print("The high level prompt is ", self.hl_prompt) 
+        print("The low level prompt is ", self.ll_prompt)
+        if self.ll_prompt in PRIMITIVES:
+            # should execute hard coded action, otherwise generate the subgoal 
+            pass
+        response = requests.post(self.SERVER_ADDRESS + str("/gen_subgoal"), json=data, timeout=99999999)
         data = response.json()
         img_data = base64.b64decode(data['goal'])
         subgoal = PILImage.open(io.BytesIO(img_data))
