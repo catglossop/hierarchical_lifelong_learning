@@ -282,7 +282,7 @@ def generate_plan():
                            Ultimately, we want the robot to perform the high level tasks {(", ").join(TASKS)}. Given the current observation, 
                            generate a plan in the form of a list of actions the robot should take using only the low level tasks in this list: {(", ").join(PRIMITIVES)}. 
                            If it seems that none of the high level tasks can be immediately accomplished, generate a reasonable plan as a list of low level tasks that explore the environment to find the high level tasks.
-                           Format the list as follows '[insert action], [insert action], [insert action], ...'. If a high level task is being executed, append the high level task to the end of the list. Otherwise, append 'None'."""
+                           Format the list as follows '[insert action], [insert action], [insert action], ...'. If a high level task is being executed, append the high level task to the end of the list. Otherwise, append 'None'. Return nothing but the plan."""
     planning_message = {
     "role": "user",
     "content": [
