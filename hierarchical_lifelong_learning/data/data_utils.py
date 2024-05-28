@@ -120,37 +120,27 @@ def make_dataset(
 
     return dataset.repeat()
 
-def relabel_primitives(traj, chunk_size, yaw_threshold, pos_threshold):
-    traj_obs = traj["observation"]
-
-    yaw = traj_obs["yaw"]
-    pos = traj_obs["position"]
-    print(traj["_len"]) 
-    if yaw.shape[0] == None: 
-        print("No yaw values")
-        return traj
-    else:
-        print("Len of traj is: ", yaw.shape)
+def relabel_primitives(traj, primitive, chunk_size, yaw_threshold, pos_threshold):
+    yaw = traj["yaw"]
+    pos = traj["position"]
     if yaw.shape[0] < chunk_size: 
         yaw_chunks = [yaw]
         pos_chunks = [pos]
-        image_chunks = [traj_obs["obs"]]
+        image_chunks = [traj["obs"]]
     else:
         num_chunks = len(yaw)//chunk_size
         yaw_chunks = np.array_split(yaw, num_chunks)
         pos_chunks = np.array_split(pos, num_chunks)
-        image_chunks = np.array_split(traj_obs["obs"], num_chunks)
-    gt_lang = traj_obs["gt_lang"][-1]
-    goal = traj_obs["goal"][-1]
-    print(gt_lang)
+        image_chunks = [[traj["obs"][i*chunk_size:(i+1)*chunk_size]] for i in range(0, len(traj["obs"]), chunk_size)]
+    gt_lang = traj["gt_lang"]
+    goal = traj["goal"]
     samples_out = []
 
     for yaw_chunk, pos_chunk, image_chunk in zip(yaw_chunks, pos_chunks, image_chunks):
-        print("shapes: ", yaw_chunk.shape, pos_chunk.shape)
         yaw_delta = float(get_yaw_delta(yaw_chunk).squeeze())
         pos_delta = np.sqrt(np.sum(np.square(pos_chunk[-1,:] - pos_chunk[0,:]), axis=-1))
-        print("Yaw delta: ", yaw_delta)
-        print("Pos delta: ", pos_delta)
+        # print("Yaw delta: ", yaw_delta)
+        # print("Pos delta: ", pos_delta)
         if yaw_delta > yaw_threshold:
             lang = base_instructions[0]
             #varied_lang = random.choice(varied_left)
@@ -165,15 +155,22 @@ def relabel_primitives(traj, chunk_size, yaw_threshold, pos_threshold):
                 lang = base_instructions[3]
                 #varied_lang = random.choice(varied_stop)
         sample = {}
-        sample["obs"] = tf.convert_to_tensor([tf.io.decode_image(chunk, expand_animations=False).numpy() for chunk in image_chunk])
-        print(sample["obs"].shape)
+        sample["obs"] = image_chunk
         sample["lang"] = lang
         #sample["varied_lang"] = varied_lang
         sample["gt_lang"] = gt_lang 
-        sample["goal"] = tf.io.decode_image(goal, expand_animations=False)
-        print("Relabelled lang: ", lang)
-
-        samples_out.append(sample)
+        sample["goal"] = goal
+        # print("Relabelled lang: ", lang)
+        if primitive == "all":
+            samples_out.append(sample)
+        elif primitive == base_instructions[0] and lang == base_instructions[0]:
+            samples_out.append(sample)
+        elif primitive == base_instructions[1] and lang == base_instructions[1]:
+            samples_out.append(sample)
+        elif primitive == base_instructions[2] and lang == base_instructions[2]:
+            samples_out.append(sample)
+        elif primitive == base_instructions[2] and lang == base_instructions[2]:
+            samples_out.append(sample)
 
     return samples_out
 
