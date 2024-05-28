@@ -79,7 +79,7 @@ class LowLevelPolicy(Node):
         self.traj_duration = 0
         self.bridge = CvBridge()
         self.reached_dist = 5
-
+        self.vlm_plan = None
 
         # Load the model 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -277,8 +277,9 @@ class LowLevelPolicy(Node):
     def send_image_to_server(self, image: PILImage.Image) -> dict:
         image_base64 = self.image_to_base64(image)
         if self.vlm_plan is None or len(self.vlm_plan) == 0:
+            print("Requesting VLM plan")
             response = requests.post(self.SERVER_ADDRESS + str("/gen_plan"), json={'curr': image_base64}, timeout=99999999)
-            vlm_plan = response.json()['vlm_plan'].split(', ')
+            vlm_plan = response.json()['plan'].split(', ')
             hl_prompt = vlm_plan[-1]
             ll_prompts = vlm_plan[:-1]
             self.hl_prompt = hl_prompt
