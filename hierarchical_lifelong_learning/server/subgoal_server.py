@@ -272,7 +272,6 @@ def generate_subgoal():
 @app.route('/gen_plan', methods=["POST"])
 def generate_plan():
     # Receive data 
-    global message_buffer
     data = request.get_json()
     img_data = base64.b64decode(data['curr'])
     curr_obs = Image.open(BytesIO(img_data))
@@ -287,7 +286,7 @@ def generate_plan():
     planning_message = {
     "role": "user",
     "content": [
-        {"type": "text", "text": initial_context},
+        {"type": "text", "text": planning_context},
         {
             "type": "image_url",
             "image_url": {"url":"data:image/jpeg;base64,{}".format(curr_obs_64)},
@@ -296,7 +295,7 @@ def generate_plan():
         }
     ai_response = client.chat.completions.create(
             model=gpt_model,
-            messages=message_buffer,
+            messages=[planning_message],
             max_tokens=300,
     )
     vlm_plan = ai_response.choices[0].message.content
