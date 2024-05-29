@@ -145,8 +145,8 @@ class LowLevelPolicy(Node):
             self.state_callback,
             self.irobot_qos_profile)
         self.odom_msg = Odometry()
-        self.current_pos = None 
-        self.current_yaw = None 
+        self.current_pos = np.array([0,0])
+        self.current_yaw = 0
         self.odom_sub = self.create_subscription(
             Odometry, 
             "/amcl_pose",
@@ -353,7 +353,8 @@ class LowLevelPolicy(Node):
         else:
             response = requests.post(self.SERVER_ADDRESS + str("/gen_subgoal"), json=data, timeout=99999999)
             data = response.json()
-            print("Subgoal generation succeeded: ", data['success'])
+            print("Subgoal generation succeeded: ", data['succeeded'])
+            self.subgoal_gen_succeeded = data['succeeded']
             img_data = base64.b64decode(data['goal'])
             subgoal = PILImage.open(io.BytesIO(img_data))
             subgoal = np.array(subgoal)
@@ -387,7 +388,14 @@ class LowLevelPolicy(Node):
             else:
                 self.context_queue.pop(0)
                 self.context_queue.append(self.image_msg)
-    
+
+    def get_yaw_delta(self, yaw_reshape):
+        yaw_delta = yaw_reshape[-1] - yaw_reshape[0]
+        yaw_delta_sign = np.where(yaw_delta >= np.pi, -1, 0)
+        yaw_delta_sign = np.where(yaw_delta < -np.pi, 1, yaw_delta_sign)
+        yaw_delta = yaw_delta + yaw_delta_sign*2*np.pi
+        return yaw_delta
+
     def process_images(self):
         self.obs_images = transform_images(self.context_queue, self.model_params["image_size"], center_crop=True)
         self.obs_images = torch.split(self.obs_images, 3, dim=1)
@@ -532,6 +540,7 @@ class LowLevelPolicy(Node):
 
             if self.reached_goal or self.traj_duration > self.subgoal_timeout or (self.state == "do_task" and self.wait_for_reset) or self.subgoal_image is None: 
                 # Update the goal image
+                print("Getting subgoal/plan")
                 self.subgoal_image = self.send_image_to_server(self.image_msg)
                 if self.subgoal_image is not None: 
                     self.subgoal_image = self.subgoal_image.astype(np.uint8)
@@ -544,37 +553,37 @@ class LowLevelPolicy(Node):
                 self.reached_goal = False
                 self.wait_for_reset = False
                 
-                # Check the coherence of the prompt and the label (primitives)
-                pos_delta = np.linalg.norm(self.traj_pos[-1] - self.traj_pos[0])
-                yaw_delta = get_yaw_deltas(self.traj_yaws)
-                if yaw_delta > YAW_THRESHOLD:
-                    traj_lang = "Turn left"
-                elif yaw_delta < -YAW_THRESHOLD:
-                    traj_lang = "Turn right"
-                else:
-                    if pos_delta > POS_THRESHOLD:
-                        traj_lang = "Go forward"
+                if self.traj_idx != 0:
+                    # Check the coherence of the prompt and the label (primitives)
+                    pos_delta = np.linalg.norm(self.traj_pos[-1] - self.traj_pos[0])
+                    yaw_delta = self.get_yaw_delta(np.array(self.traj_yaws))
+                    if yaw_delta > YAW_THRESHOLD:
+                        traj_lang = "Turn left"
+                    elif yaw_delta < -YAW_THRESHOLD:
+                        traj_lang = "Turn right"
                     else:
-                        lang = base_instructions[3]
-                        traj_lang = "Stop"
+                        if pos_delta > POS_THRESHOLD:
+                            traj_lang = "Go forward"
+                        else:
+                            traj_lang = "Stop"
+                    traj_match = SequenceMatcher(None, self.ll_prompt, traj_lang).ratio() > 0.7
+                    self.primitive_matches[self.traj_idx] = {}
+                    self.primitive_matches[self.traj_idx]["ll_prompt"] = self.ll_prompt
+                    self.primitive_matches[self.traj_idx]["traj_lang"] = traj_lang
+                    self.primitive_matches[self.traj_idx]["traj_pos"] = np.array(self.traj_pos).tolist()
+                    self.primitive_matches[self.traj_idx]["traj_yaws"] = self.traj_yaws
+                    self.primitive_matches[self.traj_idx]["match"] = traj_match
+                    self.primitive_matches[self.traj_idx]["dist"] = str(self.dists[0])
+                    self.primitive_matches[self.traj_idx]["status"] = self.status
+                    self.primitive_matches[self.traj_idx]["subgoal_gen_succeeded"] = self.subgoal_gen_succeeded
 
-                traj_match = SequenceMatcher(None, self.ll_prompt, traj_lang).ratio() > 0.7
-                self.primitive_matches[self.traj_idx] = {}
-                self.primitive_matches[self.traj_idx]["ll_prompt"] = self.ll_prompt
-                self.primitive_matches[self.traj_idx]["traj_lang"] = traj_lang
-                self.primitive_matches[self.traj_idx]["traj_pos"] = self.traj_pos
-                self.primitive_matches[self.traj_idx]["traj_yaws"] = self.traj_yaws
-                self.primitive_matches[self.traj_idx]["match"] = traj_match
-                self.primitive_matches[self.traj_idx]["dist"] = self.dists[0]
-                self.primitive_matches[self.traj_idx]["status"] = self.status
-
-                with open("/home/create/hi_learn_results/primitives/primitive_matches.json", "w") as f:
-                    json.dump(self.primitive_matches, f)
-                
-                json_object = json.loads(self.primitive_matches)
-                json_formatted_str = json.dumps(json_object, indent=2)
-                print("Results for this traj: ")
-                print(json_formatted_str)
+                    with open("/home/create/hi_learn_results/primitives/primitive_matches.json", "w") as f:
+                        json.dump(self.primitive_matches, f)
+                    
+                    json_object = json.loads(self.primitive_matches)
+                    json_formatted_str = json.dumps(json_object, indent=2)
+                    print("Results for this traj: ")
+                    print(json_formatted_str)
 
                 self.traj_idx +=1
 
