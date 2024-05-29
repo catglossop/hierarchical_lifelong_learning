@@ -79,10 +79,8 @@ def main(_):
     samples_to_wait_for = 10000  # usually 1000
     pbar = tqdm.tqdm(total=samples_to_wait_for, desc="Waiting for data")
     while True: 
-
-        while online_dataset_datastore.size < samples_to_wait_for:
-            time.sleep(1.0)
-            pbar.update(online_dataset_datastore.size - pbar.n)
+        time.sleep(1.0)
+        pbar.update(online_dataset_datastore.size - pbar.n)
         
         #lock.acquire()
         #raw_dataset = online_dataset_datastore.as_dataset().iterator()

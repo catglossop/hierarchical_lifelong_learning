@@ -135,7 +135,8 @@ def relabel_primitives(traj, primitive, chunk_size, yaw_threshold, pos_threshold
         yaw_chunks = np.array_split(yaw, num_chunks)
         pos_chunks = np.array_split(pos, num_chunks)
         image_chunks = [[traj["obs"][i*chunk_size:(i+1)*chunk_size]] for i in range(0, len(traj["obs"]), chunk_size)]
-    gt_lang = traj["gt_lang"]
+    gt_lang_ll = traj["gt_lang_ll"]
+    gt_lang_hl = traj["gt_lang_hl"]
     goal = traj["goal"]
     samples_out = []
 
