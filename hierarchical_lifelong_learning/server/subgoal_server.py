@@ -62,7 +62,7 @@ PRETRAINED_PATH = "runwayml/stable-diffusion-v1-5:flax"
 prompt_w = 4.0
 context_w = 6.0
 diffusion_num_steps = 50
-num_samples = 6
+num_samples = 10
 
 # Import OpenAI params 
 gpt_model = "gpt-4o"
@@ -103,7 +103,7 @@ for img in os.listdir(context_image_folder):
     context_images[img.split(".")[0]] = image_to_base64(Image.open(os.path.join(context_image_folder, img)))
     
 PRIMITIVES = ["Go forward", "Turn left", "Turn right", "Stop"]
-TASKS = ["Go down the hallway", "Go to the chair", "Go to the kitchen", "Go down the hallway", "Go to the door", "Follow the person"]
+TASKS = ["Go down the hallway", "Go to the chair", "Go to the kitchen", "Go to the door", "Follow the person"]
 initial_context = f"""A robot is moving through an indoor environment. It is being given language tasks which include the primitive actions {(", ").join(PRIMITIVES)}
                     and the higher level tasks {(", ").join(TASKS)}. The robot has a model that can generate image subgoals conditioned on a language instruction. 
                     We provide examples of good observation and generated subgoal pairs. 
@@ -230,7 +230,7 @@ def generate_subgoal():
             gpt_approved = True
             if DEBUG:
                 imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
-            response = jsonify(goal=gen_subgoal_64)
+            response = jsonify(goal=gen_subgoal_64, succeeded=True)
             message_buffer = [initial_message]
             return response
         idx += 1
@@ -263,7 +263,7 @@ def generate_subgoal():
     gen_subgoal_selected = samples[int(ai_response.choices[0].message.content)]
     if DEBUG:
         imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
-    response = jsonify(goal=gen_subgoal_selected)
+    response = jsonify(goal=gen_subgoal_selected, succeeded=False)
     if DEBUG:
         text_file.close()
     message_buffer = [initial_message]
