@@ -118,7 +118,7 @@ class LowLevelPolicy(Node):
         self.colors = [BLUE, GREEN, RED, CYAN, MAGENTA, YELLOW]
         self.traj_color_map = {'blue' : 0, 'green' : 1, 'red' : 2, 'cyan' : 3, 'magenta' : 4, 'yellow' : 5}
         self.step = 0
-        self.plan_freq = 3
+        self.plan_freq = 1
 
         os.makedirs("/home/create/hi_learn_results/primitives", exist_ok=True)
 
@@ -329,7 +329,6 @@ class LowLevelPolicy(Node):
         reasoning = res['reason']
 
         self.chosen_action = self.naction[self.traj_color_map[trajectory]]
-        print(self.chosen_action.shape)
 
 
     # TODO: add subscription to VLM planner to get the goal
@@ -505,7 +504,6 @@ class LowLevelPolicy(Node):
             #     if self.starting_traj: 
             #         self.starting_traj = False 
             self.chosen_waypoint = self.chosen_action[self.args.waypoint]
-            self.chosen_action = self.chosen_action[self.args.waypoint:]
             # Normalize and publish waypoint
             if self.model_params["normalize"]:
                 self.chosen_waypoint[:2] *= (self.MAX_V / self.RATE)  
