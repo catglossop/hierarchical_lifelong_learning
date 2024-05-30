@@ -84,7 +84,7 @@ class LowLevelPolicy(Node):
         self.dists = None
         self.traj_duration = 0
         self.bridge = CvBridge()
-        self.reached_dist = 5
+        self.reached_dist = 10
         self.vlm_plan = None
         self.traj_yaws = []
         self.traj_pos = []
@@ -145,11 +145,11 @@ class LowLevelPolicy(Node):
             self.state_callback,
             self.irobot_qos_profile)
         self.odom_msg = Odometry()
-        self.current_pos = np.array([0,0])
-        self.current_yaw = 0
+        self.current_pos = None
+        self.current_yaw = None
         self.odom_sub = self.create_subscription(
             Odometry, 
-            "/amcl_pose",
+            "/odom",
             self.odom_callback,
             self.irobot_qos_profile)
 
@@ -324,10 +324,15 @@ class LowLevelPolicy(Node):
         if self.vlm_plan is None or len(self.vlm_plan) == 0 or SINGLE_STEP:
             print("Requesting VLM plan")
             response = requests.post(self.SERVER_ADDRESS + str("/gen_plan"), json={'curr': image_base64}, timeout=99999999)
-            vlm_plan = response.json()['plan']
-            vlm_plan = vlm_plan.split(", ")
-            hl_prompt = vlm_plan[-1]
-            ll_prompts = vlm_plan[:-1]
+            res = response.json()['plan']
+            res = json.loads(res)
+            print(res)
+            vlm_plan = res['plan']
+            hl_prompt = res['hl_prompt']
+            reasoning = res['reason']
+            # vlm_plan = vlm_plan.split(", ")
+            # hl_prompt = vlm_plan[-1]
+            ll_prompts = vlm_plan
             self.hl_prompt = hl_prompt
             self.vlm_plan = ll_prompts
             print(self.vlm_plan)
@@ -353,7 +358,6 @@ class LowLevelPolicy(Node):
         else:
             response = requests.post(self.SERVER_ADDRESS + str("/gen_subgoal"), json=data, timeout=99999999)
             data = response.json()
-            print("Subgoal generation succeeded: ", data['succeeded'])
             self.subgoal_gen_succeeded = data['succeeded']
             img_data = base64.b64decode(data['goal'])
             subgoal = PILImage.open(io.BytesIO(img_data))
@@ -455,16 +459,13 @@ class LowLevelPolicy(Node):
         self.sampled_actions_pub.publish(self.sampled_actions_msg)
         self.naction = self.naction[0] 
         self.chosen_waypoint = self.naction[self.args.waypoint] 
-        print(self.chosen_waypoint.shape)
     def timer_callback(self):
 
         self.chosen_waypoint = np.zeros(4, dtype=np.float32)
         if DEBUG:
             self.is_docked = False
         if len(self.context_queue) > self.model_params["context_size"] and not self.is_docked:
-            print("Wait for reset: ", self.wait_for_reset)
-            print("Subgoal image: ", self.subgoal_image is not None)
-            print("state: ", self.state)
+            print("State: ", self.state)
             self.traj_pos.append(self.current_pos)
             self.traj_yaws.append(self.current_yaw)
             if not self.wait_for_reset and self.subgoal_image is not None: 
@@ -485,9 +486,7 @@ class LowLevelPolicy(Node):
                 self.traj_duration += 1
                 if DEBUG: 
                     print("Traj dur: ", self.traj_duration)
-                    print("Current state: ", self.state)
                     print("Goal reached: ", self.reached_goal)
-                    print("Wait for reset: ", self.wait_for_reset)
                 if self.traj_duration > self.subgoal_timeout:
                     self.is_terminal = True 
                     self.status = "timeout"
@@ -528,8 +527,6 @@ class LowLevelPolicy(Node):
                 res = self.local_data_store.insert(formatted_obs)
                 if self.starting_traj: 
                     self.starting_traj = False 
-                # print(self.local_data_store.get_latest_data(0))
-                print("Size of datastore: ", len(self.local_data_store))
 
                 # Normalize and publish waypoint
                 if self.model_params["normalize"]:
@@ -540,7 +537,6 @@ class LowLevelPolicy(Node):
 
             if self.reached_goal or self.traj_duration > self.subgoal_timeout or (self.state == "do_task" and self.wait_for_reset) or self.subgoal_image is None: 
                 # Update the goal image
-                print("Getting subgoal/plan")
                 self.subgoal_image = self.send_image_to_server(self.image_msg)
                 if self.subgoal_image is not None: 
                     self.subgoal_image = self.subgoal_image.astype(np.uint8)
@@ -580,10 +576,8 @@ class LowLevelPolicy(Node):
                     with open("/home/create/hi_learn_results/primitives/primitive_matches.json", "w") as f:
                         json.dump(self.primitive_matches, f)
                     
-                    json_object = json.loads(self.primitive_matches)
-                    json_formatted_str = json.dumps(json_object, indent=2)
                     print("Results for this traj: ")
-                    print(json_formatted_str)
+                    print(self.primitive_matches)
 
                 self.traj_idx +=1
 

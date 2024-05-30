@@ -276,13 +276,17 @@ def generate_plan():
     img_data = base64.b64decode(data['curr'])
     curr_obs = Image.open(BytesIO(img_data))
     curr_obs_64 = image_to_base64(curr_obs)
-
+    specific_task = "Go to the door."
     # Pass image to GPT
-    planning_context = f"""A robot is moving through an indoor environment. The provided image is the robot's current observation. 
-                           Ultimately, we want the robot to perform the high level tasks {(", ").join(TASKS)}. Given the current observation, 
-                           generate a plan in the form of a list of actions the robot should take using only the low level tasks in this list: {(", ").join(PRIMITIVES)} which are executed at with a max angular velocity of 0.2 rad/s and linear velocity of 0.1 m/s over 15 seconds that aims to accomplish the high level task "Go to the door.". 
-                           If it seems that none of the high level tasks can be immediately accomplished, generate a reasonable plan as a list of low level tasks that explore the environment to find the high level tasks.
-                           Format the list as follows '[insert action], [insert action], [insert action], ...' where the action replaces [insert action]. If a high level task is being executed, append the high level task to the end of the list. Otherwise, append 'None'. Return nothing but the plan with no additional words."""
+    # planning_context = f"""A robot is moving through an indoor environment. The provided image is the robot's current observation. 
+    #                        Ultimately, we want the robot to perform the high level tasks {(", ").join(TASKS)}. Given the current observation, 
+    #                        generate a plan in the form of a list of actions the robot should take using only the low level tasks in this list: {(", ").join(PRIMITIVES)} which are executed at with a max angular velocity of 0.2 rad/s and linear velocity of 0.1 m/s over 15 seconds. 
+    #                        If it seems that none of the high level tasks can be immediately accomplished, generate a reasonable plan as a list of low level tasks that explore the environment to find the high level tasks.
+    #                        Format the list as follows '[insert action], [insert action], [insert action], ...' where the action replaces [insert action]. If a high level task is being executed, append the high level task to the end of the list. Otherwise, append 'None'. Return nothing but the plan."""
+    planning_context = f"""A robot is moving through an indoor environment. The provided image is the robot's current observation. Ultimately, we want the robot to perform the high level task '{specific_task}'. Given the current observation, 
+                           generate a plan in the form of a list of actions the robot should take using only the low level tasks in this list: {(", ").join(PRIMITIVES)} which are executed at with a max angular velocity of 0.2 rad/s and linear velocity of 0.1 m/s over 15 seconds. 
+                           If it seems that none of the high level task can be immediately accomplished, generate a reasonable plan as a list of low level tasks that explore the environment to eventually perform the high-level task '{specific_task}'.
+                           Format the your response as a json object as follows "'hl_task':'{specific_task}','plan':[[insert action],[insert action],[insert action], ...],'reason':'[insert reasoning]'" where the action replaces [insert action] and the reasoning for the plan replaces [insert reasoning]. Return nothing but the response in this form."""
     planning_message = {
     "role": "user",
     "content": [
