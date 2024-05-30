@@ -99,8 +99,8 @@ def gen_ll_plan():
     planning_context = f"""A robot is moving through an indoor environment. The robot is currently executing the task '{hl_prompt}'. 
                            We provide an annotated version of the robot's current observation with trajectories it can take projected onto the image in cyan, magenta, yellow, green, blue, and red. 
                            Select the trajectory which will lead the robot to complete the task. If none of the trajectories immediately accomplish the task '{hl_prompt}', select the trajectory which will help the robot
-                           explore the environment to find the goal. If it seems that the task has been completed, set 'task_success' to True in your response. Format your response as a JSON as follows: "'trajectory':'<color of the trajectory>','task_success':'<true or false>','reason':'<reasoning>'". Return nothing but the response
-                           in this form."""
+                           explore the environment to find the goal. If it seems that the task has been completed, set 'task_success' to True in your response. Format your response as a JSON as follows: '"trajectory":"<color of the trajectory>","task_success":<True or False>,"reason":"<reasoning>"'. Return nothing but the response
+                           in this form and make sure to use double quotes for the keys and string values."""
     planning_message = {
     "role": "user",
     "content": [

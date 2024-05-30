@@ -122,6 +122,7 @@ class VisualizationNode(Node):
                                         "recon", self.sampled_actions, 
                                         [], COLORS, 
                                         [])
+            fig.savefig("annotated_img.jpg")
             ax.set_axis_off()
             plt.tight_layout()
             # show image

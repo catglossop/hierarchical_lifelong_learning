@@ -143,7 +143,11 @@ class LowLevelPolicy(Node):
             depth=1
             )
         
-        # SUBSCRIBERS  
+        # SUBSCRIBERS 
+        self.annotated_img_pub = self.create_publisher(
+                                        Image, 
+                                        ANNOTATED_IMAGE_TOPIC, 
+                                        1) 
         self.image_msg = Image()
         self.image_sub = self.create_subscription(
             Image,
@@ -309,11 +313,13 @@ class LowLevelPolicy(Node):
         img_buf = io.BytesIO()
         fig.savefig(img_buf, format='jpg')
         image = PILImage.open(img_buf)
+        msg = pil_to_msg(im, encoding="passthrough")
+        self.annotated_img_pub.publish(msg)
         image_base64 = self.image_to_base64(image)
 
         print("Requesting VLM plan")
         response = requests.post(self.SERVER_ADDRESS + str("/gen_plan"), json={'actions': image_base64}, timeout=99999999)
-        res = response.json()['plan']
+        res = response.json()['traj']
         res = json.loads(res)
         print(res)
         trajectory = res['trajectory'].lower()
