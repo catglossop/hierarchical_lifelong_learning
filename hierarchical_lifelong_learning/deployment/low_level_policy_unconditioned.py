@@ -308,13 +308,15 @@ class LowLevelPolicy(Node):
                                         "recon", self.naction, 
                                         [], self.colors, 
                                         [])
+        fig.savefig("annotated_img.jpg")
         ax.set_axis_off()
         plt.tight_layout()
         img_buf = io.BytesIO()
         fig.savefig(img_buf, format='jpg')
         image = PILImage.open(img_buf)
-        msg = pil_to_msg(im, encoding="passthrough")
-        self.annotated_img_pub.publish(msg)
+        image_np = np.array(image).astype(np.uint8)
+        annotated_msg = self.bridge.cv2_to_imgmsg(image_np, "passthrough")
+        self.annotated_img_pub.publish(annotated_msg)
         image_base64 = self.image_to_base64(image)
 
         print("Requesting VLM plan")
