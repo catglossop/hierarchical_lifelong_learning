@@ -286,7 +286,7 @@ def generate_plan():
     planning_context = f"""A robot is moving through an indoor environment. The provided image is the robot's current observation. Ultimately, we want the robot to perform the high level task '{specific_task}'. Given the current observation, 
                            generate a plan in the form of a list of actions the robot should take using only the low level tasks in this list: {(", ").join(PRIMITIVES)} which are executed at with a max angular velocity of 0.2 rad/s and linear velocity of 0.1 m/s over 15 seconds. 
                            If it seems that none of the high level task can be immediately accomplished, generate a reasonable plan as a list of low level tasks that explore the environment to eventually perform the high-level task '{specific_task}'.
-                           Format the your response as a json object as follows "'hl_task':'{specific_task}','plan':[[insert action],[insert action],[insert action], ...],'reason':'[insert reasoning]'" where the action replaces [insert action] and the reasoning for the plan replaces [insert reasoning]. Return nothing but the response in this form."""
+                           Format the your response as a json object in the form of a dictionary as follows "'hl_task':'{specific_task}','plan':[[insert action],[insert action],[insert action], ...],'reason':'[insert reasoning]'" where the action replaces [insert action] and the reasoning for the plan replaces [insert reasoning]. Return nothing but the response in this form."""
     planning_message = {
     "role": "user",
     "content": [

@@ -7,6 +7,7 @@ import torch.nn as nn
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from collections import OrderedDict
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 
 import matplotlib.pyplot as plt
 import yaml
@@ -143,6 +144,7 @@ class LowLevelPolicy(Node):
             depth=1
             )
         
+        self.callback_group = ReentrantCallbackGroup()
         # SUBSCRIBERS 
         self.annotated_img_pub = self.create_publisher(
                                         Image, 
@@ -153,7 +155,8 @@ class LowLevelPolicy(Node):
             Image,
             IMAGE_TOPIC,
             self.image_callback,
-            1)
+            10, 
+            callback_group=self.callback_group)
         self.subgoal_image = None
         self.dock_msg = Dock()
         self.is_docked = True
@@ -197,7 +200,7 @@ class LowLevelPolicy(Node):
         
         # TIMERS
         self.timer_period = 1/self.RATE  # seconds
-        self.timer = self.create_timer(self.timer_period, self.timer_callback)
+        self.timer = self.create_timer(self.timer_period, self.timer_callback, callback_group=self.callback_group)
         # self.controller_block_timer = self.create_timer(0.5, self.controller_block_timer_callback)
         self.undock_action_client = ActionClient(self, Undock, 'undock')
     
@@ -321,7 +324,8 @@ class LowLevelPolicy(Node):
 
         print("Requesting VLM plan")
         response = requests.post(self.SERVER_ADDRESS + str("/gen_plan"), json={'actions': image_base64}, timeout=99999999)
-        res = response.json()['traj']
+        res =  "{" + response.json()['traj'].split("{")[1].split("}")[0] + "}"
+        print(res)
         res = json.loads(res)
         print(res)
         trajectory = res['trajectory'].lower()
@@ -369,6 +373,7 @@ class LowLevelPolicy(Node):
         self.current_pos = np.array([odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y])
         
     def image_callback(self, msg):
+        print("got image")
         self.image_msg = msg_to_pil(msg)
         self.obs = self.image_msg
         self.fake_goal = torch.randn((1, 3, self.model_params["image_size"][0], self.model_params["image_size"][1])).to(self.device)
@@ -439,6 +444,7 @@ class LowLevelPolicy(Node):
         self.sampled_actions_msg = Float32MultiArray()
         self.sampled_actions_msg.data = np.concatenate((np.array([0]), self.naction.flatten())).tolist()
         self.sampled_actions_pub.publish(self.sampled_actions_msg)
+        self.context_queue = []
         
     def timer_callback(self):
         self.chosen_waypoint = np.zeros(4, dtype=np.float32)
@@ -454,7 +460,7 @@ class LowLevelPolicy(Node):
 
                 # If there is no plan currently get the plan from the server
                 # self.get_traj_from_server(self.image_msg, self.hl_prompt)
-                self.get_traj_from_server(self.image_msg)
+                self.get_traj_from_server(self.obs)
             
             # if 
 
@@ -588,7 +594,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--waypoint",
         "-w",
-        default=2, # close waypoints exihibit straight line motion (the middle waypoint is a good default)
+        default=4, # close waypoints exihibit straight line motion (the middle waypoint is a good default)
         type=int,
         help=f"""index of the waypoint used for navigation (between 0 and 4 or 
         how many waypoints your model predicts) (default: 2)""",
