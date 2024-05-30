@@ -18,6 +18,7 @@ import requests
 import tensorflow as tf
 import copy
 import json
+from datetime import datetime
 
 # ROS
 import rclpy
@@ -100,14 +101,8 @@ class LowLevelPolicy(Node):
         self.traj_pos = []
         self.primitive_matches = {}
         self.traj_idx = 0
+        now = datetime.now() 
         self.date_time = now.strftime("%m-%d-%Y_%H-%M-%S")
-        self.fake_goal = torch.randn((1, 3, self.model_params["image_size"][0], self.model_params["image_size"][1])).to(self.device)
-        self.mask = torch.ones(1).long().to(self.device) # ignore the goal
-        self.colors = OrderedDict([('blue', (BLUE, 0)), ('green', (GREEN, 1)), ('red', (RED,2)), ('cyan', (CYAN,3)), ('magenta', (MAGENTA, 4)), ('yellow', (YELLOW, 5))])
-        self.step = 0
-        self.plan_freq = 3
-
-        os.makedirs("/home/create/hi_learn_results/primitives", exist_ok=True)
 
         # Load the model 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -120,17 +115,26 @@ class LowLevelPolicy(Node):
         # Load data config
         self.load_data_config()
 
+        self.colors = [BLUE, GREEN, RED, CYAN, MAGENTA, YELLOW]
+        self.traj_color_map = {'blue' : 0, 'green' : 1, 'red' : 2, 'cyan' : 3, 'magenta' : 4, 'yellow' : 5}
+        self.step = 0
+        self.plan_freq = 3
+
+        os.makedirs("/home/create/hi_learn_results/primitives", exist_ok=True)
+
+
+
         # INFRA FOR SAVING DATA
-        self.local_data_store = QueuedDataStore(capacity=10000)
-        train_config = make_trainer_config()
-        self.trainer = TrainerClient(
-            "lifelong_data",
-            self.server_ip,
-            train_config,
-            self.local_data_store,
-            wait_for_server=True,
-        )
-        self.trainer.start_async_update(interval=5)
+        # self.local_data_store = QueuedDataStore(capacity=10000)
+        # train_config = make_trainer_config()
+        # self.trainer = TrainerClient(
+        #     "lifelong_data",
+        #     self.server_ip,
+        #     train_config,
+        #     self.local_data_store,
+        #     wait_for_server=True,
+        # )
+        # self.trainer.start_async_update(interval=5)
 
         self.irobot_qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT, 
@@ -254,14 +258,14 @@ class LowLevelPolicy(Node):
         with open(model_paths_config, "r") as f:
             model_paths = yaml.safe_load(f)
 
-        model_config_path = model_paths["nomad"]["config_path"]
+        model_config_path = model_paths[self.args.model]["config_path"]
         with open(model_config_path, "r") as f:
             self.model_params = yaml.safe_load(f)
 
         self.context_size = self.model_params["context_size"] 
 
         # Load model weights
-        self.ckpth_path = model_paths["nomad"]["ckpt_path"]
+        self.ckpth_path = model_paths[self.args.model]["ckpt_path"]
         if os.path.exists(self.ckpth_path):
             print(f"Loading model from {self.ckpth_path}")
         else:
@@ -295,15 +299,14 @@ class LowLevelPolicy(Node):
     def get_traj_from_server(self, image: PILImage.Image) -> dict:
         # Plot the actions on the image
         fig, ax = plt.subplots()
-        print(self.colors.values()[0])
         annotated_image = plot_trajs_and_points_on_image(ax, 
-                                        self.image.resize((640, 480), PILImage.Resampling.NEAREST), 
+                                        image.resize((640, 480), PILImage.Resampling.NEAREST), 
                                         "recon", self.naction, 
-                                        [], self.colors.values()[0], 
+                                        [], self.colors, 
                                         [])
         ax.set_axis_off()
         plt.tight_layout()
-        img_buf = BytesIO()
+        img_buf = io.BytesIO()
         fig.savefig(img_buf, format='jpg')
         image = PILImage.open(img_buf)
         image_base64 = self.image_to_base64(image)
@@ -317,7 +320,8 @@ class LowLevelPolicy(Node):
         hl_prompt = res['task_success']
         reasoning = res['reason']
 
-        self.chosen_action = self.naction[self.colors[trajectory][1],...]
+        self.chosen_action = self.naction[self.traj_color_map[trajectory]]
+        print(self.chosen_action.shape)
 
 
     # TODO: add subscription to VLM planner to get the goal
@@ -360,6 +364,8 @@ class LowLevelPolicy(Node):
     def image_callback(self, msg):
         self.image_msg = msg_to_pil(msg)
         self.obs = self.image_msg
+        self.fake_goal = torch.randn((1, 3, self.model_params["image_size"][0], self.model_params["image_size"][1])).to(self.device)
+        self.mask = torch.ones(1).long().to(self.device) # ignore the goal
         self.obs_bytes = self.transform_image_to_string(self.image_msg, (160,120))
         if self.context_size is not None:
             if len(self.context_queue) < self.context_size + 1:
@@ -440,7 +446,8 @@ class LowLevelPolicy(Node):
             if self.step%self.plan_freq == 0:
 
                 # If there is no plan currently get the plan from the server
-                self.get_traj_from_server(self.image_msg, self.hl_prompt)
+                # self.get_traj_from_server(self.image_msg, self.hl_prompt)
+                self.get_traj_from_server(self.image_msg)
             
             # if 
 
@@ -614,7 +621,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num-samples",
         "-n",
-        default=8,
+        default=6,
         type=int,
         help=f"Number of actions sampled from the exploration model (default: 8)",
     )

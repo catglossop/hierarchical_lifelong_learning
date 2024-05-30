@@ -119,6 +119,7 @@ def gen_ll_plan():
     selected_trajectory = ai_response.choices[0].message.content
     print(selected_trajectory)
     response = jsonify(traj=selected_trajectory)
+    return response
 
 @app.route('/verify_action', methods=["POST"])
 def generate_subgoal():
