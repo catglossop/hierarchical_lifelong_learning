@@ -33,9 +33,9 @@ from deployment.topic_names import (IMAGE_TOPIC,
 
 # CONSTANTS
 TOPOMAP_IMAGES_DIR = "topomaps/images"
-ROBOT_CONFIG_PATH ="../../../deployment/config/robot.yaml"
-MODEL_CONFIG_PATH = "../../../deployment/config/models.yaml"
-DATA_CONFIG = "../../../deployment/config/data_config.yaml"
+ROBOT_CONFIG_PATH ="../../../../deployment/config/robot.yaml"
+MODEL_CONFIG_PATH = "../../../../deployment/config/models.yaml"
+DATA_CONFIG = "../../../../deployment/config/data_config.yaml"
 
 
 
@@ -53,12 +53,11 @@ class LowLevelPolicy(Node):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Using device:", self.device)
         self.load_model_from_config(MODEL_CONFIG_PATH)
+        self.language = "Turn right"
+        self.VOCAB = ["Turn left", "Turn right", "Go forward", "Stop"]
 
         # Load the config
         self.load_config(ROBOT_CONFIG_PATH)
-
-        # Load the topomap
-        # self.load_topomap(TOPOMAP_IMAGES_DIR)
 
         # Load data config
         self.load_data_config()
@@ -105,6 +104,14 @@ class LowLevelPolicy(Node):
         delta = ex_actions[:,1:] - ex_actions[:,:-1]
         return delta
 
+    def transform_lang(self, goal_lang):
+        if type(goal_lang) == str:
+            goal_lang = self.VOCAB.index(goal_lang)
+        else:
+            goal_lang = [self.VOCAB.index(word) for word in goal_lang]
+        goal_lang = torch.tensor(goal_lang).long()
+        return goal_lang
+
     def get_action(self):
         # diffusion_output: (B, 2*T+1, 1)
         # return: (B, T-1)
@@ -132,7 +139,7 @@ class LowLevelPolicy(Node):
         with open(model_paths_config, "r") as f:
             model_paths = yaml.safe_load(f)
 
-        model_config_path = model_paths["nomad"]["config_path"]
+        model_config_path = model_paths["nomad_lang"]["config_path"]
         print(os.getcwd())
         with open(model_config_path, "r") as f:
             self.model_params = yaml.safe_load(f)
@@ -140,7 +147,7 @@ class LowLevelPolicy(Node):
         self.context_size = self.model_params["context_size"] 
 
         # Load model weights
-        self.ckpth_path = model_paths["nomad"]["ckpt_path"]
+        self.ckpth_path = model_paths["nomad_lang"]["ckpt_path"]
         if os.path.exists(self.ckpth_path):
             print(f"Loading model from {self.ckpth_path}")
         else:
@@ -161,25 +168,6 @@ class LowLevelPolicy(Node):
             prediction_type='epsilon'
         )
     
-    def load_topomap(self, topomap_images_dir):
-        # Load topomap
-        topomap_filenames = sorted(os.listdir(os.path.join(
-            topomap_images_dir, self.args.dir)), key=lambda x: int(x.split(".")[0]))
-        topomap_dir = f"{TOPOMAP_IMAGES_DIR}/{self.args.dir}"
-        self.num_nodes = len(os.listdir(topomap_dir))
-        self.topomap = []
-        for i in range(self.num_nodes):
-            image_path = os.path.join(topomap_dir, topomap_filenames[i])
-            self.topomap.append(PILImage.open(image_path))
-        
-        self.closest_node = 0
-        assert -1 <= self.args.goal_node < len(self.topomap), "Invalid goal index"
-        if self.args.goal_node == -1:
-            self.goal_node = len(self.topomap) - 1
-        else:
-            self.goal_node = self.args.goal_node
-        self.reached_goal = False
-    
     def load_data_config(self):
         # LOAD DATA CONFIG
         with open(os.path.join(os.path.dirname(__file__), DATA_CONFIG), "r") as f:
@@ -191,7 +179,6 @@ class LowLevelPolicy(Node):
 
     def image_callback(self, msg):
         self.image_msg = msg_to_pil(msg)
-        img = self.image_msg.save("test_image.jpg")
         if self.context_size is not None:
             if len(self.context_queue) < self.context_size + 1:
                 self.context_queue.append(self.image_msg)
@@ -208,27 +195,23 @@ class LowLevelPolicy(Node):
     
     def infer_actions(self):
         # Get early fusion obs goal for conditioning
+        self.goal_lang = self.model("text_encoder", goal_lang=self.goal_lang)
         self.obsgoal_cond = self.model('vision_encoder', 
-                                        obs_img=self.obs_images.repeat(len(self.goal_image), 1, 1, 1), 
-                                        goal_img=self.goal_image, 
-                                        input_goal_mask=self.mask.repeat(len(self.goal_image)))
+                                        obs_img=self.obs_images, 
+                                        goal_img=self.goal_lang, 
+                                        input_goal_mask=self.mask)
         # Predict distances
         self.dists = self.model("dist_pred_net", obsgoal_cond=self.obsgoal_cond)
         self.dists = to_numpy(self.dists.flatten())
         print("DISTANCES: ", self.dists)
-        self.min_idx = np.argmin(self.dists)
-        self.closest_node = self.min_idx + self.start
-        print("closest node:", self.closest_node)
-        self.sg_idx = min(self.min_idx + int(self.dists[self.min_idx] < self.args.close_threshold), len(self.obsgoal_cond) - 1)
-        self.obs_cond = self.obsgoal_cond[self.sg_idx].unsqueeze(0)
 
         # infer action
         with torch.no_grad():
             # encoder vision features
-            if len(self.obs_cond.shape) == 2:
-                self.obs_cond = self.obs_cond.repeat(self.args.num_samples, 1)
+            if len(self.obsgoal_cond.shape) == 2:
+                self.obs_cond = self.obsgoal_cond.repeat(self.args.num_samples, 1)
             else:
-                self.obs_cond = self.obs_cond.repeat(self.args.num_samples, 1, 1)
+                self.obs_cond = self.obsgoal_cond.repeat(self.args.num_samples, 1, 1)
             
             # initialize action from Gaussian noise
             self.noisy_action = torch.randn(
@@ -254,12 +237,10 @@ class LowLevelPolicy(Node):
                     sample=self.naction
                 ).prev_sample
             print("time elapsed:", time.time() - self.start_time)
-            print("DEVICE: " , self.device)
 
         self.naction = to_numpy(self.get_action())
         self.sampled_actions_msg = Float32MultiArray()
         self.sampled_actions_msg.data = np.concatenate((np.array([0]), self.naction.flatten())).tolist()
-        print("published sampled actions")
         self.sampled_actions_pub.publish(self.sampled_actions_msg)
         self.naction = self.naction[0] 
         self.chosen_waypoint = self.naction[self.args.waypoint] 
@@ -272,11 +253,7 @@ class LowLevelPolicy(Node):
             # Process observations
             self.process_images()
 
-            # Get goal image
-            self.start = max(self.closest_node - self.args.radius, 0)
-            self.end = min(self.closest_node + self.args.radius + 1, self.goal_node)
-            self.goal_image = [transform_images(g_img, self.model_params["image_size"], center_crop=False).to(self.device) for g_img in self.topomap[self.start:self.end + 1]]
-            self.goal_image = torch.concat(self.goal_image, dim=0)
+            self.goal_lang = self.transform_lang(self.language).to(self.device)
 
             # Use policy to get actions
             self.infer_actions()
@@ -289,12 +266,12 @@ class LowLevelPolicy(Node):
         self.waypoint_pub.publish(self.waypoint_msg)
 
         # Check if goal reached
-        self.reached_goal = bool(self.closest_node == self.goal_node)
-        print(self.reached_goal, type(self.reached_goal))
-        self.reached_goal_msg.data = self.reached_goal
-        self.reached_goal_pub.publish(self.reached_goal_msg)
-        if self.reached_goal:
-            print("Reached goal! Stopping...")
+        # self.reached_goal = bool(self.closest_node == self.goal_node)
+        # print(self.reached_goal, type(self.reached_goal))
+        # self.reached_goal_msg.data = self.reached_goal
+        # self.reached_goal_pub.publish(self.reached_goal_msg)
+        # if self.reached_goal:
+        #     print("Reached goal! Stopping...")
 
 
 def main(args):

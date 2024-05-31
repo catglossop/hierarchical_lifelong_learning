@@ -318,7 +318,7 @@ class LowLevelPolicy(Node):
         fig.savefig(img_buf, format='jpg')
         image = PILImage.open(img_buf)
         image_np = np.array(image).astype(np.uint8)
-        annotated_msg = self.bridge.cv2_to_imgmsg(image_np, "passthrough")
+        annotated_msg = self.bridge.cv2_to_imgmsg(image_np, "rgb")
         self.annotated_img_pub.publish(annotated_msg)
         image_base64 = self.image_to_base64(image)
 
@@ -444,7 +444,6 @@ class LowLevelPolicy(Node):
         self.sampled_actions_msg = Float32MultiArray()
         self.sampled_actions_msg.data = np.concatenate((np.array([0]), self.naction.flatten())).tolist()
         self.sampled_actions_pub.publish(self.sampled_actions_msg)
-        self.context_queue = []
         
     def timer_callback(self):
         self.chosen_waypoint = np.zeros(4, dtype=np.float32)
@@ -515,7 +514,10 @@ class LowLevelPolicy(Node):
                 self.chosen_waypoint[:2] *= (self.MAX_V / self.RATE)  
 
             self.waypoint_msg.data = self.chosen_waypoint.tolist()
-            self.waypoint_pub.publish(self.waypoint_msg)
+            self.execute = 0
+            while self.execute < self.args.waypoint:
+                self.waypoint_pub.publish(self.waypoint_msg)
+                self.execute += 1
 
             self.step += 1
 
@@ -594,7 +596,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--waypoint",
         "-w",
-        default=4, # close waypoints exihibit straight line motion (the middle waypoint is a good default)
+        default=2, # close waypoints exihibit straight line motion (the middle waypoint is a good default)
         type=int,
         help=f"""index of the waypoint used for navigation (between 0 and 4 or 
         how many waypoints your model predicts) (default: 2)""",
