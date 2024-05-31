@@ -305,6 +305,7 @@ class LowLevelPolicy(Node):
     # TODO: add subscription to VLM planner to get the goal
     def get_traj_from_server(self, image: PILImage.Image) -> dict:
         # Plot the actions on the image
+        image = image.convert('RGB')
         fig, ax = plt.subplots()
         annotated_image = plot_trajs_and_points_on_image(ax, 
                                         image.resize((640, 480), PILImage.Resampling.NEAREST), 
@@ -318,7 +319,7 @@ class LowLevelPolicy(Node):
         fig.savefig(img_buf, format='jpg')
         image = PILImage.open(img_buf)
         image_np = np.array(image).astype(np.uint8)
-        annotated_msg = self.bridge.cv2_to_imgmsg(image_np, "rgb")
+        annotated_msg = self.bridge.cv2_to_imgmsg(image_np, "passthrough")
         self.annotated_img_pub.publish(annotated_msg)
         image_base64 = self.image_to_base64(image)
 

@@ -94,6 +94,7 @@ def gen_ll_plan():
     img_data = base64.b64decode(data['actions'])
 
     curr_obs = Image.open(BytesIO(img_data))
+    curr_obs.save("curr_obs.png")
     curr_obs_64 = image_to_base64(curr_obs)
 
     # hl_prompt = data['hl_prompt']
