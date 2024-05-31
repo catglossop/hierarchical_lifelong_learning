@@ -65,7 +65,7 @@ gpt_model = gpt_model
 message_buffer = []
 DEBUG = False 
 PRIMITIVES = ["Go forward", "Turn left", "Turn right", "Stop"]
-TASK = "Go to the end of the hallway."
+TASK = "Go to the kitchen."
 
 def image_to_base64(image):
     buffer = BytesIO()

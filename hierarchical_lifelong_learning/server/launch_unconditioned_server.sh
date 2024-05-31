@@ -12,7 +12,7 @@ tmux splitw -h -p 50 # split it into two halves
 tmux select-pane -t 0
 tmux send-keys "conda activate hi_learn" Enter
 tmux send-keys "cd /nfs/nfs2/users/cglossop/ && . config_openai.sh" Enter
-tmux send-keys "cd /nfs/nfs2/users/cglossop/hierarchical_lifelong_learning/hierarchical_lifelong_learning/server && python vlm_closed_cloop_server.py" Enter
+tmux send-keys "cd /nfs/nfs2/users/cglossop/hierarchical_lifelong_learning/hierarchical_lifelong_learning/server && python vlm_closed_loop_server.py" Enter
 
 # # Launch data collection
 # tmux select-pane -t 1
