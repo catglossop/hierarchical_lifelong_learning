@@ -305,7 +305,7 @@ class LowLevelPolicy(Node):
     # TODO: add subscription to VLM planner to get the goal
     def get_traj_from_server(self, image: PILImage.Image) -> dict:
         # Plot the actions on the image
-        image = image.convert('RGB')
+        image = image.convert("RGB")
         fig, ax = plt.subplots()
         annotated_image = plot_trajs_and_points_on_image(ax, 
                                         image.resize((640, 480), PILImage.Resampling.NEAREST), 
@@ -323,37 +323,40 @@ class LowLevelPolicy(Node):
         self.annotated_img_pub.publish(annotated_msg)
         image_base64 = self.image_to_base64(image)
 
-        print("Requesting VLM plan")
-        response = requests.post(self.SERVER_ADDRESS + str("/gen_plan"), json={'actions': image_base64}, timeout=99999999)
+        if self.ll_success:
+            self.ll_prompt = self.vlm_plan.pop(0)
+        if self.vlm_plan is None or len(self.vlm_plan) == 0:
+            assert self.ll_prompt == "GEN_NEW_PLAN"
+            print("Requesting VLM plan")
+            response = requests.post(self.SERVER_ADDRESS + str("/gen_plan"), json={'actions': image_base64}, timeout=99999999)
+            res =  "{" + response.json()['traj'].split("{")[1].split("}")[0] + "}"
+            res = json.loads(res)
+            print(res)
+            self.vlm_plan = res['plan']
+            self.hl_success = bool(res['task_success'])
+            self.reasoning = res['reason']
+        
+        if self.hl_success: 
+            print("TRAJECTORY SUCCESSFUL")
+            return True
+        
+        if type(self.ll_prompt) == list:
+            self.ll_prompt = self.ll_prompt[0]
+        
+        response = requests.post(self.SERVER_ADDRESS + str("/verify_action"), json={'actions': image_base64, 'll_prompt':self.ll_prompt}, timeout=99999999)
         res =  "{" + response.json()['traj'].split("{")[1].split("}")[0] + "}"
-        print(res)
         res = json.loads(res)
-        print(res)
         trajectory = res['trajectory'].lower()
-        hl_prompt = res['task_success']
-        reasoning = res['reason']
+        if trajectory == "none":
+            trajectory = "red"
+        self.ll_success = res['task_success']
+        try: 
+            reasoning = res['reason']
+        except: 
+            reasoning = res['reasoning']
 
         self.chosen_action = self.naction[self.traj_color_map[trajectory]]
-
-
-    # TODO: add subscription to VLM planner to get the goal
-    # def get_action_from_server(self, image: PILImage.Image) -> dict:
-
-    #     data = {
-    #         'curr': image_base64,
-    #         'hl_prompt': self.hl_prompt,
-    #         'll_prompt': self.ll_prompt,
-    #     }
-    #     print("The high level prompt is ", self.hl_prompt) 
-    #     print("The low level prompt is ", self.ll_prompt)
-    #     else:
-    #         response = requests.post(self.SERVER_ADDRESS + str("/gen_subgoal"), json=data, timeout=99999999)
-    #         data = response.json()
-    #         self.subgoal_gen_succeeded = data['succeeded']
-    #         img_data = base64.b64decode(data['goal'])
-    #         subgoal = PILImage.open(io.BytesIO(img_data))
-    #         subgoal = np.array(subgoal)
-    #         return subgoal
+        return False 
 
     def send_undock(self):
         goal_msg = Undock.Goal()
@@ -460,7 +463,14 @@ class LowLevelPolicy(Node):
 
                 # If there is no plan currently get the plan from the server
                 # self.get_traj_from_server(self.image_msg, self.hl_prompt)
-                self.get_traj_from_server(self.obs)
+                result = self.get_traj_from_server(self.obs)
+
+                if result:
+                    self.reached_goal = True
+                    self.traj_duration = 0
+                    self.status = "reached_goal"
+                    while True: 
+                        print("DONE")
             
             # if 
 
@@ -597,7 +607,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--waypoint",
         "-w",
-        default=2, # close waypoints exihibit straight line motion (the middle waypoint is a good default)
+        default=7, # close waypoints exihibit straight line motion (the middle waypoint is a good default)
         type=int,
         help=f"""index of the waypoint used for navigation (between 0 and 4 or 
         how many waypoints your model predicts) (default: 2)""",

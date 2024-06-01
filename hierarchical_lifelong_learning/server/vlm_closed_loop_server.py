@@ -85,10 +85,10 @@ def gen_hl_instruct():
     curr_obs = Image.open(BytesIO(img_data))
 
     pass
-message_buffer = []
+plan_message_buffer = []
 @app.route('/gen_plan', methods=["POST"])
 def gen_ll_plan():
-    global message_buffer
+    global plan_message_buffer
     # Receive data 
     data = request.get_json()
     img_data = base64.b64decode(data['actions'])
@@ -100,11 +100,11 @@ def gen_ll_plan():
     # hl_prompt = data['hl_prompt']
     hl_prompt = TASK
     planning_context = f"""A robot is moving through an indoor environment. The robot is currently executing the task '{hl_prompt}'. 
-                           We provide an annotated version of the robot's current observation with trajectories it can take projected onto the image in cyan, magenta, yellow, green, blue, and red. 
-                           Select the trajectory which will lead the robot to complete the task. If none of the trajectories immediately accomplish the task '{hl_prompt}', select the trajectory which will help the robot
-                           explore the environment to find the goal. If it seems that the task has been completed (ie. the object has been reached and is approximately less than 0.5 meters away or the task is done), 
-                           set 'task_success' to True in your response. Format your response as a JSON as follows: '"trajectory":"<color of the trajectory>","task_success":"<true or false>","reason":"<reasoning>"'. Return nothing but the response
-                           in this form and make sure to use double quotes for the keys and values."""
+                           Given the current observation and this task, decompose the high level task into subtasks that can be completed to achieve this task. 
+                           For example, if the high level task is "Go to the kitchen.", the task might be decomposed into ["turn down the hallway", "go down the hallway", "GEN_NEW_PLAN"] 
+                           where the "GEN_NEW_PLAN" token indicates where the plan is not yet certain. There should be less than 5 subtasks in this plan. If it seems that the high level task has been completed (ie. the object has been reached and is approximately less than 0.5 meters away or the task is done), 
+                           set 'task_success' to True in your response. Format your response as a JSON as follows: '"plan":["subtask_1", "subtask_2"...],"task_success":"<true or false>","reason":"<reasoning>"' where the 'reason' field contains the reasoning for
+                           the plan. Return nothing but the response in this form and make sure to use double quotes for the keys and values."""
     planning_message = {
     "role": "user",
     "content": [
@@ -115,123 +115,60 @@ def gen_ll_plan():
         },
         ],
         }
-    message_buffer.append(planning_message)
+    plan_message_buffer.append(planning_message)
     ai_response = client.chat.completions.create(
             model=gpt_model,
-            messages=message_buffer,
+            messages=plan_message_buffer,
             max_tokens=300,
     )
-    message_buffer.append(ai_response.choices[0].message)
+    plan_message_buffer.append(ai_response.choices[0].message)
     if len(message_buffer) > BUFFER_SIZE: 
-        message_buffer = message_buffer[-BUFFER_SIZE:]
+        plan_message_buffer = plan_message_buffer[-BUFFER_SIZE:]
+
+    plan = ai_response.choices[0].message.content
+    response = jsonify(plan=plan)
+    return response
+
+action_message_buffer = []
+@app.route('/verify_action', methods=["POST"])
+def verify_action():
+    global action_message_buffer
+    # Receive data 
+    data = request.get_json()
+    img_data = base64.b64decode(data['actions'])
+    ll_prompt = data['ll_prompt']
+
+    curr_obs_64 = image_to_base64(curr_obs)
+    hl_prompt = TASK
+    action_context = f"""A robot is moving through an indoor environment. The robot has been tasked with the high level task '{hl_prompt}' and is executing the subtask {ll_prompt} to complete this task. 
+                           We provide an annotated version of the robot's current observation with trajectories it can take projected onto the image in cyan, magenta, yellow, green, blue, and red. 
+                           Select the trajectory which will lead the robot to complete the subtask. If none of the trajectories immediately accomplish the task '{hl_prompt}', select the trajectory which will help the robot
+                           explore the environment to complete the current subtask. If it seems that the task has been completed (ie. the object has been reached and is approximately less than 0.5 meters away or the task is done), 
+                           set 'task_success' to True in your response. Format your response as a JSON as follows: '"trajectory":"<color of the trajectory>","task_success":"<true or false>","reason":"<reasoning>"'. Return nothing but the response
+                           in this form and make sure to use double quotes for the keys and values."""
+    action_message = {
+    "role": "user",
+    "content": [
+        {"type": "text", "text": action_context},
+        {
+            "type": "image_url",
+            "image_url": {"url":"data:image/jpeg;base64,{}".format(curr_obs_64)},
+        },
+        ],
+        }
+    action_message_buffer.append(action_message)
+    ai_response = client.chat.completions.create(
+            model=gpt_model,
+            messages=action_message_buffer,
+            max_tokens=300,
+    )
+    action_message_buffer.append(ai_response.choices[0].message)
+    if len(action_message_buffer) > BUFFER_SIZE: 
+        action_message_buffer = action_message_buffer[-BUFFER_SIZE:]
 
     selected_trajectory = ai_response.choices[0].message.content
     print(selected_trajectory)
     response = jsonify(traj=selected_trajectory)
-    return response
-
-@app.route('/verify_action', methods=["POST"])
-def generate_subgoal():
-    # Receive data
-    data = request.get_json()
-    img_data = base64.b64decode(data['curr'])
-    curr_obs = Image.open(BytesIO(img_data))
-    # Pass image to GPT
-    gpt_approved = False
-    idx = 0
-    curr_obs_np = np.array(curr_obs.resize((128, 128), Image.Resampling.LANCZOS))[...,:3]
-    print("Generating subgoal...")
-    gen_subgoal = diffusion_sample(curr_obs_np, ll_prompt)
-    time_key = datetime.now().strftime("%Y-%d-%m_%H-%M-%S")
-    folder = f"gen_subgoals_{ll_prompt_mod}_{time_key}"
-    if DEBUG:
-        os.makedirs(folder, exist_ok=True)
-        text_file = open(os.path.join(folder, "gpt_comments.txt"), "a+")
-
-    if DEBUG:
-        imageio.imwrite(os.path.join(folder, "gen_subgoal_{}.png".format(idx)), gen_subgoal)
-    samples_descrip = []
-    samples = []
-    curr_obs_64 = image_to_base64(curr_obs)
-    gen_subgoal_64 = image_to_base64(Image.fromarray(gen_subgoal))
-    while not gpt_approved and idx < num_samples:
-        print("Diffusion sample: ", idx)
-        current_context = f"""The ID of this message is {idx}. A robot is trying to perform the high level task {hl_prompt} (ignore if None). It is currently executing the low level task {ll_prompt}. 
-                            The first image is the robot's current observation and the second image is the the goal image for the low level prompt. 
-                            Is this goal image consistent with the current observation, high level task, and low level task? 
-                            Respond in the form 'YES: [insert an explaination of why this subgoal is good]' if yes and 
-                            'NO: [insert an explaination of why the subgoal is bad]' if no."""
-        current_message = {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": current_context},
-                {
-                    "type": "image_url",
-                    "image_url": {"url":"data:image/jpeg;base64,{}".format(curr_obs_64)},
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {"url":"data:image/jpeg;base64,{}".format(gen_subgoal_64)},
-                },
-                ],
-            }
-        message_buffer.append(current_message)
-
-        ai_response = client.chat.completions.create(
-            model=gpt_model,
-            messages=message_buffer,
-            max_tokens=300,
-        )
-        message_buffer.append(ai_response.choices[0].message)
-
-        # process the current response for positive or negative
-        curr_response = ai_response.choices[0].message.content
-        print("Response: ", curr_response)
-        if DEBUG:
-            text_file.write(curr_response)
-        samples_descrip.append(f"{idx}: {curr_response}")
-        samples.append(gen_subgoal_64)
-        if ai_response.choices[0].message.content.split(":")[0] == "YES":
-            gpt_approved = True
-            if DEBUG:
-                imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
-            response = jsonify(goal=gen_subgoal_64, succeeded=True)
-            message_buffer = [initial_message]
-            return response
-        idx += 1
-        gen_subgoal = diffusion_sample(curr_obs_np, ll_prompt)
-        if DEBUG:
-            imageio.imwrite(os.path.join(folder, f"gen_subgoal_{idx}.png"), gen_subgoal)
-
-    # Reset the context buffer
-    samples_descrip_processed = (" ").join(samples_descrip)
-    print(samples_descrip_processed)
-    fallback_context = f"""A robot is trying to perform the high level task {hl_prompt} (ignore if None). It is currently executing the low level task {ll_prompt}. 
-                        {num_samples} subgoals were generated for this task and all of them were deemed not good enough. 
-                        Choose the best option from the previous examples and return the ID of the best option. The response must only contain the ID of the best option."""
-    fallback_message = {
-        "role": "user",
-        "content": [
-            {"type": "text", "text": fallback_context},
-            ],
-        }
-    message_buffer.append(fallback_message)
-    ai_response = client.chat.completions.create(
-        model=gpt_model,
-        messages=message_buffer,
-        max_tokens=300,
-    )
-    
-    if DEBUG:
-        text_file.write(ai_response.choices[0].message.content)
-    print("Selected subgoal is: ", int(ai_response.choices[0].message.content))
-    gen_subgoal_selected = samples[int(ai_response.choices[0].message.content)]
-    if DEBUG:
-        imageio.imwrite(os.path.join(folder, "gen_subgoal_chosen.png"), gen_subgoal)
-    response = jsonify(goal=gen_subgoal_selected, succeeded=False)
-    if DEBUG:
-        text_file.close()
-    message_buffer = [initial_message]
     return response
 
 if __name__ == "__main__":
