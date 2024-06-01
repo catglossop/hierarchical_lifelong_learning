@@ -5,7 +5,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from collections import OrderedDict
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 
 import matplotlib.pyplot as plt
 import yaml
@@ -17,6 +19,7 @@ import requests
 import tensorflow as tf
 import copy
 import json
+from datetime import datetime
 
 # ROS
 import rclpy
@@ -29,7 +32,7 @@ from rclpy.action import ActionClient
 from irobot_create_msgs.action import Undock
 from cv_bridge import CvBridge
 
-from deployment.utils import msg_to_pil, to_numpy, transform_images, load_model
+from deployment.utils import msg_to_pil, to_numpy, transform_images, load_model, pil_to_msg
 import torch
 from PIL import Image as PILImage
 import numpy as np
@@ -42,7 +45,16 @@ from difflib import SequenceMatcher
 from deployment.topic_names import (IMAGE_TOPIC,
                         WAYPOINT_TOPIC,
                         SAMPLED_ACTIONS_TOPIC, 
-                        REACHED_GOAL_TOPIC)
+                        REACHED_GOAL_TOPIC, 
+                        ANNOTATED_IMAGE_TOPIC)
+
+from hierarchical_lifelong_learning.visualize.visualize_utils import (BLUE, 
+                                                                     GREEN, 
+                                                                     RED, 
+                                                                     CYAN, 
+                                                                     MAGENTA,
+                                                                     YELLOW)
+from hierarchical_lifelong_learning.visualize.action_utils import plot_trajs_and_points_on_image
 
 # AgentLACE
 from agentlace.data.data_store import QueuedDataStore
@@ -90,9 +102,8 @@ class LowLevelPolicy(Node):
         self.traj_pos = []
         self.primitive_matches = {}
         self.traj_idx = 0
+        now = datetime.now() 
         self.date_time = now.strftime("%m-%d-%Y_%H-%M-%S")
-
-        os.makedirs("/home/create/hi_learn_results/primitives", exist_ok=True)
 
         # Load the model 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -105,17 +116,26 @@ class LowLevelPolicy(Node):
         # Load data config
         self.load_data_config()
 
+        self.colors = [BLUE, GREEN, RED, CYAN, MAGENTA, YELLOW]
+        self.traj_color_map = {'blue' : 0, 'green' : 1, 'red' : 2, 'cyan' : 3, 'magenta' : 4, 'yellow' : 5}
+        self.step = 0
+        self.plan_freq = 1
+
+        os.makedirs("/home/create/hi_learn_results/primitives", exist_ok=True)
+
+
+
         # INFRA FOR SAVING DATA
-        self.local_data_store = QueuedDataStore(capacity=10000)
-        train_config = make_trainer_config()
-        self.trainer = TrainerClient(
-            "lifelong_data",
-            self.server_ip,
-            train_config,
-            self.local_data_store,
-            wait_for_server=True,
-        )
-        self.trainer.start_async_update(interval=5)
+        # self.local_data_store = QueuedDataStore(capacity=10000)
+        # train_config = make_trainer_config()
+        # self.trainer = TrainerClient(
+        #     "lifelong_data",
+        #     self.server_ip,
+        #     train_config,
+        #     self.local_data_store,
+        #     wait_for_server=True,
+        # )
+        # self.trainer.start_async_update(interval=5)
 
         self.irobot_qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT, 
@@ -124,13 +144,19 @@ class LowLevelPolicy(Node):
             depth=1
             )
         
-        # SUBSCRIBERS  
+        self.callback_group = ReentrantCallbackGroup()
+        # SUBSCRIBERS 
+        self.annotated_img_pub = self.create_publisher(
+                                        Image, 
+                                        ANNOTATED_IMAGE_TOPIC, 
+                                        1) 
         self.image_msg = Image()
         self.image_sub = self.create_subscription(
             Image,
             IMAGE_TOPIC,
             self.image_callback,
-            1)
+            10, 
+            callback_group=self.callback_group)
         self.subgoal_image = None
         self.dock_msg = Dock()
         self.is_docked = True
@@ -174,7 +200,7 @@ class LowLevelPolicy(Node):
         
         # TIMERS
         self.timer_period = 1/self.RATE  # seconds
-        self.timer = self.create_timer(self.timer_period, self.timer_callback)
+        self.timer = self.create_timer(self.timer_period, self.timer_callback, callback_group=self.callback_group)
         # self.controller_block_timer = self.create_timer(0.5, self.controller_block_timer_callback)
         self.undock_action_client = ActionClient(self, Undock, 'undock')
     
@@ -239,14 +265,14 @@ class LowLevelPolicy(Node):
         with open(model_paths_config, "r") as f:
             model_paths = yaml.safe_load(f)
 
-        model_config_path = model_paths["nomad"]["config_path"]
+        model_config_path = model_paths[self.args.model]["config_path"]
         with open(model_config_path, "r") as f:
             self.model_params = yaml.safe_load(f)
 
         self.context_size = self.model_params["context_size"] 
 
         # Load model weights
-        self.ckpth_path = model_paths["nomad"]["ckpt_path"]
+        self.ckpth_path = model_paths[self.args.model]["ckpt_path"]
         if os.path.exists(self.ckpth_path):
             print(f"Loading model from {self.ckpth_path}")
         else:
@@ -276,96 +302,61 @@ class LowLevelPolicy(Node):
         for key in data_config['action_stats']:
             self.ACTION_STATS[key] = np.array(data_config['action_stats'][key])
 
-    # HARDCODED ACTIONS
-    def robot_stop(self): 
-        start = time.time()
-        total_time = self.timer_period*self.subgoal_timeout
-        while (time.time() - start) < total_time:
-            self.waypoint_msg.data = [0, 0]
-            self.waypoint_pub.publish(self.waypoint_msg)
-            time.sleep(self.timer_period)
-    
-    def robot_turn_left(self):
-        start = time.time()
-        total_time = self.timer_period*self.subgoal_timeout
-        while (time.time() - start) < total_time:
-            x = -self.MAX_V*np.sin(np.pi/2 - (total_time - delta_time)*self.MAX_W)
-            y = self.MAX_V*np.cos(np.pi/2 - (total_time - delta_time)*self.MAX_W)
-            print("Waypoint for turn left: ", x, y)
-            self.waypoint_msg.data = [x, y]
-            self.waypoint_pub.publish(self.waypoint_msg)
-            time.sleep(self.timer_period)
-
-    def robot_turn_right(self):
-        start = time.time()
-        total_time = self.timer_period*self.subgoal_timeout
-        while (time.time() - start) < total_time:
-            x = self.MAX_V*np.sin(np.pi/2 - (total_time - delta_time)*self.MAX_W)
-            y = self.MAX_V*np.cos(np.pi/2 - (total_time - delta_time)*self.MAX_W)
-            print("Waypoint for turn right: ", x, y)
-            self.waypoint_msg.data = [x, y]
-            self.waypoint_pub.publish(self.waypoint_msg)
-            time.sleep(self.timer_period)
-    
-    def robot_go_forward(self):
-        start = time.time()
-        total_time = self.timer_period*self.subgoal_timeout
-        delta_time = time.time() - start
-        while delta_time < total_time:
-            x = self.MAX_V*np.sin(np.pi/2 - (total_time - delta_time)*self.MAX_W)
-            print("Waypoint for turn right: ", x, y)
-            self.waypoint_msg.data = [x, y]
-            self.waypoint_pub.publish(self.waypoint_msg)
-            time.sleep(self.timer_period)
-
-
     # TODO: add subscription to VLM planner to get the goal
-    def send_image_to_server(self, image: PILImage.Image) -> dict:
+    def get_traj_from_server(self, image: PILImage.Image) -> dict:
+        # Plot the actions on the image
+        image = image.convert("RGB")
+        fig, ax = plt.subplots()
+        annotated_image = plot_trajs_and_points_on_image(ax, 
+                                        image.resize((640, 480), PILImage.Resampling.NEAREST), 
+                                        "recon", self.naction, 
+                                        [], self.colors, 
+                                        [])
+        fig.savefig("annotated_img.jpg")
+        ax.set_axis_off()
+        plt.tight_layout()
+        img_buf = io.BytesIO()
+        fig.savefig(img_buf, format='jpg')
+        image = PILImage.open(img_buf)
+        image_np = np.array(image).astype(np.uint8)
+        annotated_msg = self.bridge.cv2_to_imgmsg(image_np, "passthrough")
+        self.annotated_img_pub.publish(annotated_msg)
         image_base64 = self.image_to_base64(image)
-        if self.vlm_plan is None or len(self.vlm_plan) == 0 or SINGLE_STEP:
+
+        if self.ll_success:
+            self.ll_prompt = self.vlm_plan.pop(0)
+        if self.vlm_plan is None or len(self.vlm_plan) == 0:
+            assert self.ll_prompt == "GEN_NEW_PLAN"
             print("Requesting VLM plan")
-            response = requests.post(self.SERVER_ADDRESS + str("/gen_plan"), json={'curr': image_base64}, timeout=99999999)
-            res = response.json()['plan']
+            response = requests.post(self.SERVER_ADDRESS + str("/gen_plan"), json={'actions': image_base64}, timeout=99999999)
+            res =  "{" + response.json()['traj'].split("{")[1].split("}")[0] + "}"
             res = json.loads(res)
             print(res)
-            vlm_plan = res['plan']
-            hl_prompt = res['hl_task']
-            reasoning = res['reason']
-            # vlm_plan = vlm_plan.split(", ")
-            # hl_prompt = vlm_plan[-1]
-            ll_prompts = vlm_plan
-            self.hl_prompt = hl_prompt
-            self.vlm_plan = ll_prompts
-            print(self.vlm_plan)
-        self.ll_prompt = self.vlm_plan.pop(0)
+            self.vlm_plan = res['plan']
+            self.hl_success = bool(res['task_success'])
+            self.reasoning = res['reason']
+        
+        if self.hl_success: 
+            print("TRAJECTORY SUCCESSFUL")
+            return True
+        
         if type(self.ll_prompt) == list:
             self.ll_prompt = self.ll_prompt[0]
-        data = {
-            'curr': image_base64,
-            'hl_prompt': self.hl_prompt,
-            'll_prompt': self.ll_prompt,
-        }
-        print("The high level prompt is ", self.hl_prompt) 
-        print("The low level prompt is ", self.ll_prompt)
-        if self.ll_prompt in PRIMITIVES and HARDCODED:
-            if self.ll_prompt == "Stop":
-                self.robot_stop() 
-            if self.ll_prompt == "Go straight":
-                self.robot_go_straight()
-            if self.ll_prompt == "Turn left":
-                self.robot_turn_left()
-            if self.ll_prompt == "Turn right":
-                self.robot_turn_right()
-            # should execute hard coded action, otherwise generate the subgoal 
-            return None
-        else:
-            response = requests.post(self.SERVER_ADDRESS + str("/gen_subgoal"), json=data, timeout=99999999)
-            data = response.json()
-            self.subgoal_gen_succeeded = data['succeeded']
-            img_data = base64.b64decode(data['goal'])
-            subgoal = PILImage.open(io.BytesIO(img_data))
-            subgoal = np.array(subgoal)
-            return subgoal
+        
+        response = requests.post(self.SERVER_ADDRESS + str("/verify_action"), json={'actions': image_base64, 'll_prompt':self.ll_prompt}, timeout=99999999)
+        res =  "{" + response.json()['traj'].split("{")[1].split("}")[0] + "}"
+        res = json.loads(res)
+        trajectory = res['trajectory'].lower()
+        if trajectory == "none":
+            trajectory = "red"
+        self.ll_success = res['task_success']
+        try: 
+            reasoning = res['reason']
+        except: 
+            reasoning = res['reasoning']
+
+        self.chosen_action = self.naction[self.traj_color_map[trajectory]]
+        return False 
 
     def send_undock(self):
         goal_msg = Undock.Goal()
@@ -386,8 +377,11 @@ class LowLevelPolicy(Node):
         self.current_pos = np.array([odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y])
         
     def image_callback(self, msg):
+        print("got image")
         self.image_msg = msg_to_pil(msg)
         self.obs = self.image_msg
+        self.fake_goal = torch.randn((1, 3, self.model_params["image_size"][0], self.model_params["image_size"][1])).to(self.device)
+        self.mask = torch.ones(1).long().to(self.device) # ignore the goal
         self.obs_bytes = self.transform_image_to_string(self.image_msg, (160,120))
         if self.context_size is not None:
             if len(self.context_queue) < self.context_size + 1:
@@ -408,20 +402,13 @@ class LowLevelPolicy(Node):
         self.obs_images = torch.split(self.obs_images, 3, dim=1)
         self.obs_images = torch.cat(self.obs_images, dim=1) 
         self.obs_images = self.obs_images.to(self.device)
-        self.mask = torch.zeros(1).long().to(self.device)  
     
     def infer_actions(self):
         # Get early fusion obs goal for conditioning
-        self.obsgoal_cond = self.model('vision_encoder', 
-                                        obs_img=self.obs_images.repeat(len(self.goal_image), 1, 1, 1), 
-                                        goal_img=self.goal_image, 
-                                        input_goal_mask=self.mask.repeat(len(self.goal_image)))
-
-        self.obs_cond = self.obsgoal_cond[0].unsqueeze(0)
-
-        self.dists = self.model("dist_pred_net", obsgoal_cond=self.obsgoal_cond)
-        self.dists = to_numpy(self.dists.flatten())
-        print("DISTANCE TO SUBGOAL: ", self.dists[0])
+        self.obs_cond = self.model('vision_encoder', 
+                                    obs_img=self.obs_images, 
+                                    goal_img=self.fake_goal, 
+                                    input_goal_mask=self.mask)
 
         # infer action
         with torch.no_grad():
@@ -457,136 +444,142 @@ class LowLevelPolicy(Node):
             print("time elapsed:", time.time() - self.start_time)
 
         self.naction = to_numpy(self.get_action())
+        print("sampled actions shape: ", self.naction.shape)
         self.sampled_actions_msg = Float32MultiArray()
         self.sampled_actions_msg.data = np.concatenate((np.array([0]), self.naction.flatten())).tolist()
         self.sampled_actions_pub.publish(self.sampled_actions_msg)
-        self.naction = self.naction[0] 
-        self.chosen_waypoint = self.naction[self.args.waypoint] 
         
     def timer_callback(self):
-
         self.chosen_waypoint = np.zeros(4, dtype=np.float32)
-        if DEBUG:
-            self.is_docked = False
         if len(self.context_queue) > self.model_params["context_size"] and not self.is_docked:
             print("State: ", self.state)
             self.traj_pos.append(self.current_pos)
             self.traj_yaws.append(self.current_yaw)
-            if not self.wait_for_reset and self.subgoal_image is not None: 
-                # Process observations
-                self.process_images()
-                
-                # Check if goal reached
-                if self.dists is not None and self.dists[0] < self.reached_dist: 
+            
+            self.process_images()
+            self.infer_actions()
+
+            if self.step%self.plan_freq == 0:
+
+                # If there is no plan currently get the plan from the server
+                # self.get_traj_from_server(self.image_msg, self.hl_prompt)
+                result = self.get_traj_from_server(self.obs)
+
+                if result:
                     self.reached_goal = True
-                
-                # Get goal image
-                self.goal_image = transform_images(self.subgoal_image, self.model_params["image_size"], center_crop=False).to(self.device)
-
-                # Use policy to get actions
-                self.infer_actions()
-
-                # Step the traj duration
-                self.traj_duration += 1
-                if DEBUG: 
-                    print("Traj dur: ", self.traj_duration)
-                    print("Goal reached: ", self.reached_goal)
-                if self.traj_duration > self.subgoal_timeout:
-                    self.is_terminal = True 
-                    self.status = "timeout"
-                elif self.state == "reset":
-                    self.is_terminal = True 
-                    self.status = "crash"
-                    self.wait_for_reset = True 
-                elif self.reached_goal:
-                    self.is_terminal = True 
+                    self.traj_duration = 0
                     self.status = "reached_goal"
-                elif self.state in ["idle", "nav_to_dock", "dock", "undock", "teleop"]:
-                    self.is_terminal = True
-                    self.status = "manual"
-                    self.wait_for_reset = True
-                else:
-                    self.is_terminal = False
-                    self.status = "running"
+                    while True: 
+                        print("DONE")
+            
+            # if 
 
-                self.curr_obs = {
-                    "obs" : self.obs_bytes, 
-                    "position" : tf.convert_to_tensor(self.current_pos, dtype=np.float64),
-                    "yaw": tf.convert_to_tensor(self.current_yaw, dtype=np.float64), 
-                    "status": tf.constant(self.status, dtype=tf.string),
-                    "gt_lang_ll": tf.constant(self.ll_prompt, dtype=tf.string),
-                    "gt_lang_hl": tf.constant(self.hl_prompt, dtype=tf.string),
-                    "goal": self.goal_bytes,
+            #     # Step the traj duration
+            #     self.traj_duration += 1
+            #     if DEBUG: 
+            #         print("Traj dur: ", self.traj_duration)
+            #         print("Goal reached: ", self.reached_goal)
+            #     if self.traj_duration > self.subgoal_timeout:
+            #         self.is_terminal = True 
+            #         self.status = "timeout"
+            #     elif self.state == "reset":
+            #         self.is_terminal = True 
+            #         self.status = "crash"
+            #         self.wait_for_reset = True 
+            #     elif self.reached_goal:
+            #         self.is_terminal = True 
+            #         self.status = "reached_goal"
+            #     elif self.state in ["idle", "nav_to_dock", "dock", "undock", "teleop"]:
+            #         self.is_terminal = True
+            #         self.status = "manual"
+            #         self.wait_for_reset = True
+            #     else:
+            #         self.is_terminal = False
+            #         self.status = "running"
 
-                }
-                formatted_obs = {
-                    "observation": self.curr_obs,
-                    "action": tf.convert_to_tensor(self.chosen_waypoint, dtype=tf.float64),
-                    "is_first": tf.constant(self.starting_traj, dtype=tf.bool),
-                    "is_last": tf.constant(self.is_terminal, dtype=tf.bool),
-                    "is_terminal": tf.constant(self.is_terminal, dtype=tf.bool),
-                }
-                print(f"Observation:\n\tPosition: {formatted_obs['observation']['position'].numpy()}\n\tYaw: {formatted_obs['observation']['yaw'].numpy()}\nis first: {formatted_obs['is_first'].numpy()}\nis last: {formatted_obs['is_last'].numpy()}\nis terminal:{formatted_obs['is_terminal'].numpy()}\nstatus: {formatted_obs['observation']['status'].numpy()}\ngt lang hl: {formatted_obs['observation']['gt_lang_hl'].numpy()}\ngt lang ll: {formatted_obs['observation']['gt_lang_ll'].numpy()}")
-                print("Traj duration: ", self.traj_duration)
-                res = self.local_data_store.insert(formatted_obs)
-                if self.starting_traj: 
-                    self.starting_traj = False 
+            #     self.curr_obs = {
+            #         "obs" : self.obs_bytes, 
+            #         "position" : tf.convert_to_tensor(self.current_pos, dtype=np.float64),
+            #         "yaw": tf.convert_to_tensor(self.current_yaw, dtype=np.float64), 
+            #         "status": tf.constant(self.status, dtype=tf.string),
+            #         "gt_lang_ll": tf.constant(self.ll_prompt, dtype=tf.string),
+            #         "gt_lang_hl": tf.constant(self.hl_prompt, dtype=tf.string),
+            #         "goal": self.goal_bytes,
 
-                # Normalize and publish waypoint
-                if self.model_params["normalize"]:
-                    self.chosen_waypoint[:2] *= (self.MAX_V / self.RATE)  
+            #     }
+            #     formatted_obs = {
+            #         "observation": self.curr_obs,
+            #         "action": tf.convert_to_tensor(self.chosen_waypoint, dtype=tf.float64),
+            #         "is_first": tf.constant(self.starting_traj, dtype=tf.bool),
+            #         "is_last": tf.constant(self.is_terminal, dtype=tf.bool),
+            #         "is_terminal": tf.constant(self.is_terminal, dtype=tf.bool),
+            #     }
+            #     print(f"Observation:\n\tPosition: {formatted_obs['observation']['position'].numpy()}\n\tYaw: {formatted_obs['observation']['yaw'].numpy()}\nis first: {formatted_obs['is_first'].numpy()}\nis last: {formatted_obs['is_last'].numpy()}\nis terminal:{formatted_obs['is_terminal'].numpy()}\nstatus: {formatted_obs['observation']['status'].numpy()}\ngt lang hl: {formatted_obs['observation']['gt_lang_hl'].numpy()}\ngt lang ll: {formatted_obs['observation']['gt_lang_ll'].numpy()}")
+            #     print("Traj duration: ", self.traj_duration)
+            #     res = self.local_data_store.insert(formatted_obs)
+            #     if self.starting_traj: 
+            #         self.starting_traj = False 
+            self.chosen_waypoint = self.chosen_action[self.args.waypoint]
+            # Normalize and publish waypoint
+            if self.model_params["normalize"]:
+                self.chosen_waypoint[:2] *= (self.MAX_V / self.RATE)  
 
-                self.waypoint_msg.data = self.chosen_waypoint.tolist()
+            self.waypoint_msg.data = self.chosen_waypoint.tolist()
+            self.execute = 0
+            while self.execute < self.args.waypoint:
                 self.waypoint_pub.publish(self.waypoint_msg)
+                self.execute += 1
 
-            if self.reached_goal or self.traj_duration > self.subgoal_timeout or (self.state == "do_task" and self.wait_for_reset) or self.subgoal_image is None: 
-                # Update the goal image
-                self.subgoal_image = self.send_image_to_server(self.image_msg)
-                if self.subgoal_image is not None: 
-                    self.subgoal_image = self.subgoal_image.astype(np.uint8)
-                    self.subgoal_image = PILImage.fromarray(self.subgoal_image)
-                    self.subgoal_msg = self.bridge.cv2_to_imgmsg(np.array(self.subgoal_image), "passthrough")
-                    self.subgoal_pub.publish(self.subgoal_msg)
-                    self.goal_bytes = self.transform_image_to_string(self.subgoal_image, (160,120))
-                self.traj_duration = 0
-                self.starting_traj = True
-                self.reached_goal = False
-                self.wait_for_reset = False
+            self.step += 1
+
+            # if self.reached_goal or self.traj_duration > self.subgoal_timeout or (self.state == "do_task" and self.wait_for_reset) or self.subgoal_image is None: 
+            #     # Update the goal image
+            #     self.subgoal_image = self.send_image_to_server(self.image_msg)
+            #     if self.subgoal_image is not None: 
+            #         self.subgoal_image = self.subgoal_image.astype(np.uint8)
+            #         self.subgoal_image = PILImage.fromarray(self.subgoal_image)
+            #         self.subgoal_msg = self.bridge.cv2_to_imgmsg(np.array(self.subgoal_image), "passthrough")
+            #         self.subgoal_pub.publish(self.subgoal_msg)
+            #         self.goal_bytes = self.transform_image_to_string(self.subgoal_image, (160,120))
+            #     self.traj_duration = 0
+            #     self.starting_traj = True
+            #     self.reached_goal = False
+            #     self.wait_for_reset = False
                 
-                if self.traj_idx != 0:
-                    # Check the coherence of the prompt and the label (primitives)
-                    pos_delta = np.linalg.norm(self.traj_pos[-1] - self.traj_pos[0])
-                    yaw_delta = self.get_yaw_delta(np.array(self.traj_yaws))
-                    if yaw_delta > YAW_THRESHOLD:
-                        traj_lang = "Turn left"
-                    elif yaw_delta < -YAW_THRESHOLD:
-                        traj_lang = "Turn right"
-                    else:
-                        if pos_delta > POS_THRESHOLD:
-                            traj_lang = "Go forward"
-                        else:
-                            traj_lang = "Stop"
-                    traj_match = SequenceMatcher(None, self.ll_prompt, traj_lang).ratio() > 0.7
-                    self.primitive_matches[self.traj_idx] = {}
-                    self.primitive_matches[self.traj_idx]["ll_prompt"] = self.ll_prompt
-                    self.primitive_matches[self.traj_idx]["traj_lang"] = traj_lang
-                    self.primitive_matches[self.traj_idx]["traj_pos"] = np.array(self.traj_pos).tolist()
-                    self.primitive_matches[self.traj_idx]["traj_yaws"] = self.traj_yaws
-                    self.primitive_matches[self.traj_idx]["match"] = traj_match
-                    self.primitive_matches[self.traj_idx]["dist"] = str(self.dists[0])
-                    self.primitive_matches[self.traj_idx]["status"] = self.status
-                    self.primitive_matches[self.traj_idx]["subgoal_gen_succeeded"] = self.subgoal_gen_succeeded
+            #     if self.traj_idx != 0:
+            #         # Check the coherence of the prompt and the label (primitives)
+            #         pos_delta = np.linalg.norm(self.traj_pos[-1] - self.traj_pos[0])
+            #         yaw_delta = self.get_yaw_delta(np.array(self.traj_yaws))
+            #         if yaw_delta > YAW_THRESHOLD:
+            #             traj_lang = "Turn left"
+            #         elif yaw_delta < -YAW_THRESHOLD:
+            #             traj_lang = "Turn right"
+            #         else:
+            #             if pos_delta > POS_THRESHOLD:
+            #                 traj_lang = "Go forward"
+            #             else:
+            #                 traj_lang = "Stop"
+            #         traj_match = SequenceMatcher(None, self.ll_prompt, traj_lang).ratio() > 0.7
+            #         self.primitive_matches[self.traj_idx] = {}
+            #         self.primitive_matches[self.traj_idx]["ll_prompt"] = self.ll_prompt
+            #         self.primitive_matches[self.traj_idx]["traj_lang"] = traj_lang
+            #         self.primitive_matches[self.traj_idx]["traj_pos"] = np.array(self.traj_pos).tolist()
+            #         self.primitive_matches[self.traj_idx]["traj_yaws"] = self.traj_yaws
+            #         self.primitive_matches[self.traj_idx]["match"] = traj_match
+            #         self.primitive_matches[self.traj_idx]["dist"] = str(self.dists[0])
+            #         self.primitive_matches[self.traj_idx]["status"] = self.status
+            #         self.primitive_matches[self.traj_idx]["subgoal_gen_succeeded"] = self.subgoal_gen_succeeded
 
-                    with open(f"/home/create/hi_learn_results/primitives/primitive_matches_{self.date_time}.json", "w") as f:
-                        json.dump(self.primitive_matches, f)
+            #         with open(f"/home/create/hi_learn_results/primitives/primitive_matches_{self.date_time}.json", "w") as f:
+            #             json.dump(self.primitive_matches, f)
                     
-                    print("Results for this traj: ")
-                    print(self.primitive_matches)
+            #         print("Results for this traj: ")
+            #         print(self.primitive_matches)
 
-                self.traj_idx +=1
+            #     self.traj_idx +=1
 
-                self.traj_yaws = []
-                self.traj_pos = []
+            #     self.traj_yaws = []
+            #     self.traj_pos = []
 
 
 
@@ -614,7 +607,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--waypoint",
         "-w",
-        default=2, # close waypoints exihibit straight line motion (the middle waypoint is a good default)
+        default=7, # close waypoints exihibit straight line motion (the middle waypoint is a good default)
         type=int,
         help=f"""index of the waypoint used for navigation (between 0 and 4 or 
         how many waypoints your model predicts) (default: 2)""",
@@ -653,7 +646,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num-samples",
         "-n",
-        default=8,
+        default=6,
         type=int,
         help=f"Number of actions sampled from the exploration model (default: 8)",
     )

@@ -16,7 +16,8 @@ def observation_format():
         "position": tf.TensorSpec((2,), tf.float64, name="position"),
         "yaw": tf.TensorSpec((), tf.float64, name="yaw"),
         "status": tf.TensorSpec((), tf.string, name="status"),
-        "gt_lang":tf.TensorSpec((), tf.string, name="gt_lang"),
+        "gt_lang_ll":tf.TensorSpec((), tf.string, name="gt_lang_ll"),
+        "gt_lang_hl":tf.TensorSpec((), tf.string, name="gt_lang_ll"),
         "goal": tf.TensorSpec((), tf.string, name="image"),
     }
 

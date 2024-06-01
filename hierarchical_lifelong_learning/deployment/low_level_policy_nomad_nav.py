@@ -58,7 +58,7 @@ class LowLevelPolicy(Node):
         self.load_config(ROBOT_CONFIG_PATH)
 
         # Load the topomap
-        self.load_topomap(TOPOMAP_IMAGES_DIR)
+        # self.load_topomap(TOPOMAP_IMAGES_DIR)
 
         # Load data config
         self.load_data_config()
@@ -299,57 +299,14 @@ class LowLevelPolicy(Node):
 
 def main(args):
     rclpy.init()
-    # node = rclpy.create_node('low_level_policy')
-    # thread = threading.Thread(target=rclpy.spin, args=(node, ), daemon=True)
-    # thread.start()
     low_level_policy = LowLevelPolicy(args)
 
     rclpy.spin(low_level_policy)
     low_level_policy.destroy_node()
     rclpy.shutdown()
-
-    # rate = node.create_rate(low_level_policy.RATE)
     
     print("Registered with master node. Waiting for image observations...")
     print(f"Using {low_level_policy.device}")
-
-    # try:
-    #     while rclpy.ok():
-    #         low_level_policy.chosen_waypoint = np.zeros(4, dtype=np.float32)
-    #         if len(low_level_policy.context_queue) > low_level_policy.model_params["context_size"]:
-
-    #             # Process observations
-    #             low_level_policy.process_images()
-
-    #             # Get goal image
-    #             low_level_policy.start = max(low_level_policy.closest_node - low_level_policy.args.radius, 0)
-    #             low_level_policy.end = min(low_level_policy.closest_node + low_level_policy.args.radius + 1, low_level_policy.goal_node)
-    #             low_level_policy.goal_image = [transform_images(g_img, low_level_policy.model_params["image_size"], center_crop=False).to(low_level_policy.device) for g_img in low_level_policy.topomap[low_level_policy.start:low_level_policy.end + 1]]
-    #             low_level_policy.goal_image = torch.concat(low_level_policy.goal_image, dim=0)
-
-    #             # Use policy to get actions
-    #             low_level_policy.infer_actions()
-
-    #         # Normalize and publish waypoint
-    #         if low_level_policy.model_params["normalize"]:
-    #             low_level_policy.chosen_waypoint[:2] *= (low_level_policy.MAX_V / low_level_policy.RATE)  
-
-    #         low_level_policy.waypoint_msg.data = low_level_policy.chosen_waypoint.tolist()
-    #         low_level_policy.waypoint_pub.publish(low_level_policy.waypoint_msg)
-
-    #         # Check if goal reached
-    #         low_level_policy.reached_goal = bool(low_level_policy.closest_node == low_level_policy.goal_node)
-    #         print(low_level_policy.reached_goal, type(low_level_policy.reached_goal))
-    #         low_level_policy.reached_goal_msg.data = low_level_policy.reached_goal
-    #         low_level_policy.reached_goal_pub.publish(low_level_policy.reached_goal_msg)
-    #         if low_level_policy.reached_goal:
-    #             print("Reached goal! Stopping...")
-    #         rate.sleep()
-    # except KeyboardInterrupt:
-    #     pass
-
-    # rclpy.shutdown()
-    # thread.join()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
