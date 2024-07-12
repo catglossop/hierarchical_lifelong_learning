@@ -208,7 +208,7 @@ def relabel_vlm(dataset, chunk_size = 5):
             messages=[{"role": "user", "content": prompt}]
         )
         
-        label = completion.choices[0].message.content
+        label = response.choices[0].message.content
         return label
 
     labels = []
