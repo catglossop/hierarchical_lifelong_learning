@@ -137,7 +137,8 @@ def verify_action():
     data = request.get_json()
     img_data = base64.b64decode(data['actions'])
     ll_prompt = data['ll_prompt']
-
+    curr_obs = Image.open(BytesIO(img_data))
+    curr_obs.save("curr_obs.png")
     curr_obs_64 = image_to_base64(curr_obs)
     hl_prompt = TASK
     action_context = f"""A robot is moving through an indoor environment. The robot has been tasked with the high level task '{hl_prompt}' and is executing the subtask {ll_prompt} to complete this task. 

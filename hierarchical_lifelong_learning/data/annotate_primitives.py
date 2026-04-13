@@ -120,106 +120,22 @@ def get_yaw_delta(yaw_reshape):
     yaw_delta = yaw_delta + yaw_delta_sign*2*np.pi
     return yaw_delta
 
-# yaw_avgs = []
-# yaw_stds = []
-# traj_len_hist = {}
-# yaw = np.empty((0,1))
-# print("Getting dataset action stats ...")
-# folder_names = load_data()
-# for chunk_size in range(MIN_STEPS, MAX_STEPS):
-#     yaw_avg_i = []
-#     yaw_std_i = []
-#     for folder in folder_names:
-
-#         with open(os.path.join(folder, 'traj_data.pkl'), 'rb') as f:
-#             data = pkl.load(f)
-#             yaw = data["yaw"]
-#             if yaw.shape[0] >= chunk_size:
-#                 if chunk_size in traj_len_hist.keys():
-#                     traj_len_hist[chunk_size] += 1
-#                 else:
-#                     traj_len_hist[chunk_size] = 1
-#                 if len(data["yaw"].shape) < 2:
-#                     yaw = np.expand_dims(yaw, axis=-1)
-#                 yaw_i = yaw
-#                 if yaw.shape[0] % chunk_size != 0:
-#                     yaw_i = yaw_i[:chunk_size*(yaw.shape[0]//chunk_size)]
-#                 yaw_reshape = yaw_i.reshape(-1,chunk_size)
-#                 yaw_delta = np.abs(get_yaw_delta(yaw_reshape))
-#                 yaw_avg = yaw_delta.mean()
-#                 yaw_std = yaw_delta.std()
-#                 yaw_avg_i.append(yaw_avg)
-#                 yaw_std_i.append(yaw_std)
-
-#     yaw_avgs.append(np.array(yaw_avg_i).mean())
-#     yaw_stds.append(np.array(yaw_std_i).mean())
-
-# yaw_avgs = np.asarray(yaw_avgs)
-# yaw_avg_normed = yaw_avgs/np.max(yaw_avgs)
-# yaw_stds = np.asarray(yaw_stds)
-# yaw_std_normed = yaw_stds/np.max(yaw_stds)
-
-# J = np.square(yaw_avg_normed) - np.square(yaw_std_normed)
-# CHUNK_SIZE = MIN_STEPS + np.argmax(J)
-# TURN_THRESHOLD = yaw_avgs[CHUNK_SIZE-MIN_STEPS]
-# # TURN_THRESHOLD = 0.5
-
-# fig, ax = plt.subplots(1,2)
-
-# ax[0].errorbar(np.arange(MIN_STEPS,MAX_STEPS), yaw_avgs, yaw_stds)
-# ax[1].bar(traj_len_hist.keys(), traj_len_hist.values())
-# plt.show()
-
 CHUNK_SIZE = 10
 TURN_THRESHOLD = 0.5
 STOP_THRESHOLD = 0.2
 
-# position_dists = []
-# for folder in folder_names:
-#     with open(os.path.join(folder, 'traj_data.pkl'), 'rb') as f:
-#         # Load data 
-#         data = pkl.load(f)
-#         position = data["position"]
-#         yaw = data["yaw"]
-#         if position.shape[0] >= CHUNK_SIZE:
-#             if position.shape[0] % CHUNK_SIZE != 0:
-#                 position = position[:CHUNK_SIZE*(position.shape[0]//CHUNK_SIZE)]
-#                 yaw = yaw[:CHUNK_SIZE*(position.shape[0]//CHUNK_SIZE)]
-#             position_reshape = position.reshape(-1, CHUNK_SIZE, 2)
-#             yaw_reshape = yaw.reshape(-1, CHUNK_SIZE)
-#             yaw_delta = np.abs(get_yaw_delta(yaw_reshape))
-#             yaw_mask = np.argwhere(np.abs(yaw_delta) < TURN_THRESHOLD)
-#             position_reshape = position_reshape[yaw_mask, :,:].squeeze(1)
-#             if position_reshape.shape[0] >= 1:
-#                 position_delta = position_reshape[:,-1,:] - position_reshape[:,0,:] 
-#                 position_dist = np.sqrt(np.sum(np.square(position_delta), axis=-1))
-#                 position_dists.append(position_dist.mean())
+turn_threshold = 0.5 # radians
+stop_threshold = 0.2 # meters
 
-# position_dists = np.array(position_dists)
-# DIST_MEAN = position_dists.mean()
-# DIST_MAX = np.max(position_dists)
-# DIST_MIN = np.min(position_dists)
-# DIST_STD = np.std(position_dists)
-
-# FORWARD_THRESHOLD = DIST_MEAN 
-# STOP_THRESHOLD = 0.2
-
-# print("DATASET STATS: ")
-# print("-----------------")
-# print(f"Optimal chunksize: {CHUNK_SIZE}")
-# print(f"TURN THRESHOLD: {TURN_THRESHOLD}")
-# print(f"STOP THRESHOLD: {STOP_THRESHOLD}")
-# print(f"DIST MIN: {DIST_MIN}")
-# print(f"DIST STD: {DIST_STD}")
-# print(f"DIST_MEAN: {FORWARD_THRESHOLD}")
-
-            
 
 base_instructions = ["Turn left", "Turn right", "Go forward", "Stop"]
 
 def get_language_instructions(yaw, pos):
     language_instructions = []
     varied_language_instructions = []
+
+    while idx < len(yaw) - MIN_CHUNK_SIZE:
+
 
     CHUNKS = len(yaw)//CHUNK_SIZE if len(yaw)%CHUNK_SIZE == 0 else len(yaw)//CHUNK_SIZE + 1
     for i in range(CHUNKS):
